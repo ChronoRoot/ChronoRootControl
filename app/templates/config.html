@@ -66,6 +66,10 @@
             <dt class="col-3">Updated date:</dt>
             <dd class="col-9">{{ scheduler_info.last_update }}</dd>
         </dl>
+        <dl class="row">
+            <dt class="col-3">System Uptime:</dt>
+            <dd class="col-9">{{ scheduler_info.uptime }}</dd>
+        </dl>
     </div>
     <div class="col">
         {% include 'components/backlight.html' %}

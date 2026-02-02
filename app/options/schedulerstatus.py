@@ -18,6 +18,9 @@ class SchedulerStatus(object):
     status_file = "/run/chronoroot_scheduler_status.json"
     log = None
     
+    # Initialize booting time
+    boot_at = datetime.now()
+    
     # Initialize the scheduler and jobs information
     scheduler = None
     jobs_info = {}
@@ -103,13 +106,18 @@ class SchedulerStatus(object):
         del self.jobs_info[expid]
         self.refresh_scheduler_status()
 
-
     def get_info(self):
-        self.jobs_info
+        uptime_delta = datetime.now() - self.boot_at
+        # Convert delta to a simple string format: H:MM:SS
+        total_seconds = int(uptime_delta.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{hours}h {minutes}m {seconds}s"
 
         scheduler_info = {
             "status": "running" if self.status["running"] else "stopped",
             "last_update": self.status["last_update"],
-            "running_jobs": [exp_id for exp_id,job_info in self.jobs_info.items() if job_info["status"] == "RUNNING"]
+            "uptime": uptime_str,  
+            "running_jobs": [exp_id for exp_id, job_info in self.jobs_info.items() if job_info["status"] == "RUNNING"]
         }
         return scheduler_info
