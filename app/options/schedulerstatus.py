@@ -20,7 +20,12 @@ class SchedulerStatus(object):
         "boot_at": datetime.now().isoformat(),
         "last_picture_at": None,
         "multiplexer": "UNKNOWN",
-        "cams": {1: "IDLE", 2: "IDLE", 3: "IDLE", 4: "IDLE"}
+        "cams": {
+            1: {"health": "IDLE", "last_check": "N/A", "path": None},
+            2: {"health": "IDLE", "last_check": "N/A", "path": None},
+            3: {"health": "IDLE", "last_check": "N/A", "path": None},
+            4: {"health": "IDLE", "last_check": "N/A", "path": None}
+        }
     }
     
     # Standard scheduler info
@@ -43,25 +48,24 @@ class SchedulerStatus(object):
             with open(self.status_file, 'r') as f:
                 data = json.load(f)
                 
-                # 1. Load Scheduler Data
                 self.status_running = data.get("scheduler", {}).get("running", False)
                 self.jobs_info = data.get("jobs", {})
                 
-                # 2. Load Hardware Data directly into the dictionary
-                health = data.get("health", {})
+                health_data = data.get("health", {})
                 
-                if "multiplexer" in health:
-                    self.hardware_health["multiplexer"] = health["multiplexer"]
+                if "multiplexer" in health_data:
+                    self.hardware_health["multiplexer"] = health_data["multiplexer"]
                 
-                if "last_picture" in health:
-                    self.hardware_health["last_picture_at"] = health["last_picture"]
+                if "last_picture" in health_data:
+                    self.hardware_health["last_picture_at"] = health_data["last_picture"]
 
-                # JSON converts keys to strings; convert them back to ints for consistency
-                cams = health.get("cams", {})
-                for k, v in cams.items():
+                cams_from_file = health_data.get("cams", {})
+                for k, v in cams_from_file.items():
                     try:
-                        self.hardware_health["cams"][int(k)] = v
+                        cam_id = int(k)
+                        self.hardware_health["cams"][cam_id] = v
                     except ValueError:
+                        # Skip keys that aren't integers
                         pass
 
         except Exception as e:
@@ -96,11 +100,15 @@ class SchedulerStatus(object):
     def update_hardware_status(self, state=None, cam_id=None, cam_status=None, last_pic=False):
         """
         Updates the shared dictionary. 
+        Safely merges new data into the existing dictionary structure.
         """
         if state:
             self.hardware_health["multiplexer"] = state
+            
         if cam_id is not None and cam_status:
-            self.hardware_health["cams"][int(cam_id)] = cam_status   
+            target_id = int(cam_id)
+            self.hardware_health["cams"][target_id].update(cam_status)
+
         if last_pic:
             self.hardware_health["last_picture_at"] = datetime.now().isoformat()
         
@@ -122,7 +130,7 @@ class SchedulerStatus(object):
         except (ValueError, TypeError):
             uptime_str = "Unknown"
 
-        # Format Last Picture
+        # Format Last Picture Global
         last_pic_str = "Never"
         if self.hardware_health["last_picture_at"]:
             try:
@@ -136,7 +144,7 @@ class SchedulerStatus(object):
             "uptime": uptime_str,
             "last_picture": last_pic_str,
             "multiplexer": self.hardware_health["multiplexer"],
-            "cam_reports": self.hardware_health["cams"],
+            "cam_reports": self.hardware_health["cams"], 
             "running_jobs": [eid for eid, info in self.jobs_info.items() if info.get("status") == "RUNNING"]
         }
         

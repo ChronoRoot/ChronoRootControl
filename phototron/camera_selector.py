@@ -169,10 +169,26 @@ class IVPort_v2(Selector):
         result = subprocess.run("tools/multiplexer_detected")
         return result.returncode == 0
 
+    def probe(self, camera_id):
+        import subprocess
+        try:
+            # Switch the mux
+            self.iv.camera_change(camera_id)
+            time.sleep(0.2)
+            
+            # Check if an I2C device exists at 0x10 (Standard for Pi Cam)
+            # Use i2cget -y 1 0x10
+            result = subprocess.run(['i2cget', '-y', '1', '0x10'], 
+                                   capture_output=True)
+            
+            # If returncode is 0, the chip responded
+            return result.returncode == 0
+        except:
+            return False
+        
     class Factory:
         def create(self):
             return IVPort_v2()
-
 
 #################################
 ## Null selector - Nom multiplexer installed

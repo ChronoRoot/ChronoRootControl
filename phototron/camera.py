@@ -66,6 +66,7 @@ class LinuxCamera(Camera):
 import io
 from picamera import PiCamera, PiCameraMMALError
 from PIL import Image
+
 class RaspiCamera(Camera):
     """Deals with RapberryPi camera module
     """

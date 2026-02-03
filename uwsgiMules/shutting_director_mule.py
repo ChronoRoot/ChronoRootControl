@@ -276,23 +276,26 @@ class ChiefOperator(object):
         return expid, action
 
     def handle_experiment(self, xpid, action):
-        """handle the requested action
-
-        :param: expid
-        :rtype: string
-        :param: action
-        :rtype: string
-        :returns: None
-        :rtype: None
-        """
+        """handle the requested action"""
 
         try:
-            {'CREATE': self.create_and_schedule,
-            'CANCEL' :self.sched_cancel_xp}[action](xpid)
+            {
+                'CREATE': self.create_and_schedule,
+                'CANCEL': self.sched_cancel_xp,
+                'CHECK_HARDWARE': self.check_hardware  
+            }[action](xpid)
         except KeyError:
-            print("Unemplemented action")
+            self.logger.error(f"Unimplemented action: {action}")
         return
 
+    def check_hardware(self, xpid=None):
+        """
+        Triggered by 'CHECK_HARDWARE' action in the mule.
+        """
+        self.logger.info("ChiefOperator: Triggering hardware diagnostic scan.")        
+        results = RpiModule.check_cameras(status_manager=scheduler_status)
+        return results
+    
     def create_and_schedule(self, exp_id):
         """handle experiment creation and schedule"""
 

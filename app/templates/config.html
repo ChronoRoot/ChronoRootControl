@@ -5,93 +5,154 @@
 
 {% block content %}
 
-<h1 class="mt-5">Device configuration</h1>
-<div class="row row-cols-1 row-cols-md-2">
-    <div class="col">
-        <h2>Date and time settings</h2>
+<h1 class="mt-5 mb-4">Device Configuration</h1>
 
-        <p>Curent system date on this module : <strong>{{ date }}</strong></p>
-        <form action="" method="post" name="login" class="form-inline">
-            {{ app_setting_form.hidden_tag() }}
-            {% if app_setting_form.systemDate.errors %}
-            <div class="form-group has-error mb-2 mr-sm-2">
-            {% else %}
-            <div class="form-group mb-2 mr-sm-2">
-            {% endif %}
-                <div class="input-group date" id="datetimepicker1" data-target-input="nearest">
-                {{ app_setting_form.systemDate(class="form-control")}}
-                <div class="input-group-append" data-target="#datetimepicker1" data-toggle="datetimepicker">
-                    <div class="input-group-text"><i class="far fa-calendar"></i></div>
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="fas fa-microchip mr-2"></i>Hardware Diagnostics</h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text">Scan multiplexer ports to verify connectivity.</p>
+                <form id="diagnosticForm">
+                    <button type="button" onclick="runDiagnostic()" class="btn btn-warning btn-block">
+                        <i class="fas fa-stethoscope"></i> Run Hardware Scan
+                    </button>
+                </form>
+                <div id="scanStatus" class="mt-3 text-center text-muted" style="display:none;">
+                    <small><i class="fas fa-spinner fa-spin mr-1"></i> Probing hardware...</small>
                 </div>
             </div>
-            {% for error in app_setting_form.systemDate.errors %}
-            <div class="alert alert-danger" role="alert">
-                <span class="glyphicon glyphicon-exclamation-sign" aria-hidden="true"></span>
-                    {{error}}
+        </div>
+
+                <div class="card mb-4 shadow-sm border-danger">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-power-off mr-2"></i>System Control</h5>
             </div>
-            {% endfor %}
+            <div class="card-body text-center">
+                <p>Reboot the entire Raspberry Pi module.</p>
+                
+                <button type="button" onclick="rebootSystem()" class="btn btn-outline-danger btn-lg btn-block">
+                    <i class="fas fa-sync-alt"></i> Reboot Module
+                </button>
             </div>
+        </div>
 
-            <button type="submit" name="action" value="set" class="btn btn-info mb-2" aria-label="Set">
-                Set
-            </button>
-        </form>
-    </div>
-    <div class="col">
+        <script>
+        function rebootSystem() {
+            if(!confirm('Are you sure you want to reboot the device?')) return;
+            
+            fetch("{{ url_for('api_exp.reboot') }}", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            })
+            .then(res => {
+                alert("Reboot command sent. The interface will be unavailable for a minute.");
+            });
+        }
+        </script>
 
-        <h2>Camera Focus setting</h3>
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="fas fa-server mr-2"></i>System Status</h5>
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-4">Scheduler:</dt>
+                    <dd class="col-sm-8">{{ scheduler_info.status }}</dd>
 
-         <ul class="fa-ul">
-            {% for camera_id in config.CAMS %}
-            <li>
-                <a href="{{ url_for('focus_page.index', cam_id=camera_id) }} ">
-                <span class="fa-li"><i class="fas fa-camera"></i></span>
-                    Cam {{ camera_id }}
-                </a>
-            </li>
-          {% endfor %}
-        </ul>
-    </div>
-    <div class="col">
-        <h2>Scheduler</h2>
-        <dl class="row">
-            <dt class="col-3">Status:</dt>
-            <dd class="col-9">{{ scheduler_info.status }}</dd>
-        </dl>
-        <dl class="row">
-            <dt class="col-3">Running jobs:</dt>
-            <dd class="col-9">{{ scheduler_info.running_jobs|length }}</dd>
-        </dl>
-        <dl class="row">
-            <dt class="col-3">Updated date:</dt>
-            <dd class="col-9">{{ scheduler_info.last_update }}</dd>
-        </dl>
-        <dl class="row">
-            <dt class="col-3">System Uptime:</dt>
-            <dd class="col-9">{{ scheduler_info.uptime }}</dd>
-        </dl>
-        <dl class="row">
-            <dt class="col-3">Last Capture:</dt>
-            <dd class="col-9">{{ scheduler_info.last_picture }}</dd>
-        </dl>
-        <dl class="row">
-            <dt class="col-3">Multiplexer:</dt>
-            <dd class="col-9">{{ scheduler_info.multiplexer }}</dd>
-        </dl>
-        <dl class="row">
-            <dt class="col-3">Camera Status:</dt>
-            <dd class="col-9">
-                {% for id, status in scheduler_info.cam_reports.items() %}
-                    <span class="badge {% if status == 'OK' %}badge-success{% elif status == 'FAILED' %}badge-danger{% elif status == 'CAPTURING' %}badge-warning{% else %}badge-secondary{% endif %}">
-                        Cam {{ id }}: {{ status }}
-                    </span>
+                    <dt class="col-sm-4">Running Jobs:</dt>
+                    <dd class="col-sm-8">{{ scheduler_info.running_jobs|length }}</dd>
+
+                    <dt class="col-sm-4">Uptime:</dt>
+                    <dd class="col-sm-8">{{ scheduler_info.uptime }}</dd>
+                    
+                    <dt class="col-sm-4">Multiplexer:</dt>
+                    <dd class="col-sm-8">{{ scheduler_info.multiplexer }}</dd>
+
+                    <dt class="col-sm-4">Last Capture:</dt>
+                    <dd class="col-sm-8">{{ scheduler_info.last_picture }}</dd>
+                </dl>
+                
+                <hr>
+                
+                <h6 class="font-weight-bold mb-3">Camera Health</h6>
+                <ul class="list-group list-group-flush">
+                {% for id, data in scheduler_info.cam_reports.items() %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                        <div>
+                            <span class="badge badge-pill mr-2 {% if data.health == 'OK' %}badge-success{% elif data.health in ['CAPTURING', 'TESTING'] %}badge-warning{% elif data.health == 'WAITING' %}badge-secondary{% else %}badge-danger{% endif %}">
+                                Cam {{ id }}
+                            </span>
+                            <span class="text-muted small">{{ data.health }}</span>
+                            <div class="small text-muted pl-1">Checked: {{ data.last_check }}</div>
+                        </div>
+                        
+                        {% if data.path and data.health == 'OK' %}
+                        <a href="{{ url_for('api_exp.get_system_image', filename=data.path) }}" target="_blank" class="btn btn-sm btn-outline-primary">
+                            <i class="far fa-eye"></i> View
+                        </a>
+                        {% endif %}
+                    </li>
                 {% endfor %}
-            </dd>
-        </dl>
+                </ul>
+            </div>
+        </div>
+
     </div>
-    
-    <div class="col">
-        {% include 'components/backlight.html' %}
+
+    <div class="col-lg-6">
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="far fa-clock mr-2"></i>Date & Time</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Current system date: <strong>{{ date }}</strong></p>
+                <form action="" method="post" name="login" class="form-inline">
+                    {{ app_setting_form.hidden_tag() }}
+                    <div class="input-group date mr-2 mb-2" id="datetimepicker1" data-target-input="nearest" style="flex-grow: 1;">
+                        {{ app_setting_form.systemDate(class="form-control") }}
+                        <div class="input-group-append" data-target="#datetimepicker1" data-toggle="datetimepicker">
+                            <div class="input-group-text"><i class="far fa-calendar"></i></div>
+                        </div>
+                    </div>
+                    <button type="submit" name="action" value="set" class="btn btn-info mb-2">Set</button>
+                </form>
+                {% for error in app_setting_form.systemDate.errors %}
+                <div class="alert alert-danger mt-2">
+                    {{ error }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="fas fa-camera mr-2"></i>Live Preview & Focus</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Select a camera to adjust focus:</p>
+                <div class="list-group">
+                    {% for camera_id in config.CAMS %}
+                    <a href="{{ url_for('focus_page.index', cam_id=camera_id) }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                        <span><i class="fas fa-video mr-2"></i> Camera {{ camera_id }}</span>
+                        <i class="fas fa-chevron-right text-muted"></i>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="far fa-lightbulb mr-2"></i>Backlight Control</h5>
+            </div>
+            <div class="card-body">
+                {% include 'components/backlight.html' %}
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -101,20 +162,45 @@
 <script type="text/javascript">
     $(function () {
         $.fn.datetimepicker.Constructor.Default = $.extend({}, $.fn.datetimepicker.Constructor.Default, {
-                        icons: {
-                                            time: 'far fa-clock',
-                                            date: 'far fa-calendar',
-                                            up: 'fas fa-arrow-up',
-                                            down: 'fas fa-arrow-down',
-                                            previous: 'fas fa-chevron-left',
-                                            next: 'fas fa-chevron-right',
-                                            today: 'fas fa-calendar-check',
-                                            clear: 'fas fa-trash',
-                                            close: 'fas fa-times'
-                                        } });
-
+            icons: {
+                time: 'far fa-clock',
+                date: 'far fa-calendar',
+                up: 'fas fa-arrow-up',
+                down: 'fas fa-arrow-down',
+                previous: 'fas fa-chevron-left',
+                next: 'fas fa-chevron-right',
+                today: 'fas fa-calendar-check',
+                clear: 'fas fa-trash',
+                close: 'fas fa-times'
+            } 
+        });
 
         $('#datetimepicker1').datetimepicker({format: 'YYYY-MM-DD HH:mm:ss ZZ'});
     });
+
+    function runDiagnostic() {
+        $('#scanStatus').slideDown();
+        $('.btn-warning').prop('disabled', true).addClass('disabled');
+
+        fetch("{{ url_for('api_exp.diagnostic') }}", {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(response => {
+            if (response.ok) {
+                // Wait 1 second before reloading so the user sees the button reaction
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                alert("Error starting diagnostic scan");
+                $('.btn-warning').prop('disabled', false).removeClass('disabled');
+                $('#scanStatus').hide();
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            $('.btn-warning').prop('disabled', false).removeClass('disabled');
+            $('#scanStatus').hide();
+        });
+    }
 </script>
 {% endblock %}

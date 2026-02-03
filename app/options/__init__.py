@@ -36,19 +36,29 @@ def conf():
     app_setting_form = AppSettingsForm(prefix="app_setting")
     backlight_form = BackLightForm(ir=light.state, prefix="backlight")
 
+    # --- 1. System Date Logic ---
     if app_setting_form.validate_on_submit() and app_setting_form.data:
-        retval = setSystemTime(app_setting_form.data['systemDate'], network=False)
+        new_date = app_setting_form.systemDate.data
+        retval = setSystemTime(new_date, network=False)
 
         if retval == 0:
-            flash('System date sucessfuly changed : %s'%app_setting_form.data)
+            readable_date = new_date.strftime('%Y-%m-%d %H:%M:%S')
+            flash('System date successfully changed to: %s' % readable_date, 'success')
         else:
-            flash('Error : Date change failed. System said : %s'%retval)
+            flash('Error: Date change failed. System said: %s' % retval, 'danger')
+            
+        # FORCE REFRESH: Redirect back to the GET view of this same page
+        return redirect(url_for('config_page.conf'))
 
+    # --- 2. Backlight Logic ---
     if backlight_form.validate_on_submit() and backlight_form.data:
         if backlight_form.data['ir']:
             light.state = light.ON
         else:
             light.state = light.OFF
+            
+        # FORCE REFRESH: Redirect here as well
+        return redirect(url_for('config_page.conf'))
 
     return render_template('config.html', date=now,
             app_setting_form=app_setting_form,

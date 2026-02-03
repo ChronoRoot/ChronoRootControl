@@ -49,7 +49,7 @@ class Config(object):
                         # Three cams : (1,2,3),(1,2,4),(2,3,4)
                         # Four cams : (1,2,3,4)
                         # the order inside the list is not important
-    CAM_WARMUP = 3
+    CAM_WARMUP = 5
     CAM_ADJUST_TIME = 10
 
     CAM_RETRIES = 10
@@ -72,7 +72,7 @@ class Config(object):
         'contrast' : 0, # -100 to 100
         'drc_strength' : 'off', # ('off', 'low', 'medium', 'high') <- PiCamera.DRC_STRENGTHS
         'exposure_compensation' : 0, # -25 to 25
-        'exposure_mode' : 'auto', #PiCamera.EXPOSURE_MODES <- posible values
+        'exposure_mode' : 'backlight', #PiCamera.EXPOSURE_MODES <- posible values
         'exposure_speed' : 0,
         'flash_mode': 'off', # PiCamera.FLASH_MODES
         'hflip' : False,

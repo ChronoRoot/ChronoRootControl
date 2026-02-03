@@ -255,3 +255,21 @@ class Experiment(object):
         shutil.rmtree(workdir)
         self.app.logger.info('XP %s deleted by user' % self.expid)
         return
+
+    def diagnostic(self):
+        """
+        Trigger the hardware diagnostic via the uWSGI mule
+        """
+        # Set a status to indicate a check is pending
+        self.status = "DIAGNOSTIC"
+        self.message = "Hardware scan requested..."
+        self.dump()
+        
+        message = { 
+            'id' : self.expid,
+            'action' : 'CHECK_HARDWARE'
+        }
+        
+        # Send to the mule using your existing config/imports
+        uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
+        return

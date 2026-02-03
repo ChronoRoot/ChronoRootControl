@@ -114,3 +114,45 @@ def cancel_experiment(expid):
         abort(404)
     exp.cancel()
     return jsonify(exp.to_dict())
+
+
+@api_exp.route('/diagnostic', methods=['POST'])
+def diagnostic():
+    """
+    Triggers the diagnostic using the 'system' experiment profile
+    """
+    try:
+        # We use 'system' as a reserved ID for hardware-wide checks
+        exp = Experiment(directory=os.path.join(Config.WORKING_DIR, 'system'))
+    except FileNotFoundError:
+        # Create it if it doesn't exist
+        exp = Experiment(expid='system')
+    
+    exp.diagnostic()
+    return jsonify({'result': True, 'expid': 'system'})
+
+from flask import send_from_directory
+
+@api_exp.route('/system_images/<path:filename>', methods=['GET'])
+def get_system_image(filename):
+    """
+    Serves diagnostic images from the working directory.
+    Example filename: 'system/1/2026-02-03_camera_1.png'
+    """
+    # We split the filename because send_from_directory expects the base folder 
+    # and the relative filename separately.
+    # Config.WORKING_DIR is where 'system' folder lives.
+    return send_from_directory(Config.WORKING_DIR, filename)
+
+@api_exp.route('/reboot', methods=['POST'])
+def reboot():
+    """
+    Triggers the reboot of the module
+    """
+    try:
+        # Schedule the reboot in 1 second to allow the API to send the response back first
+        # using 'shutdown -r' is safer than 'reboot'
+        os.system('(sleep 1; sudo shutdown -r now) &')
+        return jsonify({'result': True, 'message': 'System is rebooting...'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
