@@ -70,7 +70,26 @@
             <dt class="col-3">System Uptime:</dt>
             <dd class="col-9">{{ scheduler_info.uptime }}</dd>
         </dl>
+        <dl class="row">
+            <dt class="col-3">Last Capture:</dt>
+            <dd class="col-9">{{ scheduler_info.last_picture }}</dd>
+        </dl>
+        <dl class="row">
+            <dt class="col-3">Multiplexer:</dt>
+            <dd class="col-9">{{ scheduler_info.multiplexer }}</dd>
+        </dl>
+        <dl class="row">
+            <dt class="col-3">Camera Status:</dt>
+            <dd class="col-9">
+                {% for id, status in scheduler_info.cam_reports.items() %}
+                    <span class="badge {% if status == 'OK' %}badge-success{% elif status == 'FAILED' %}badge-danger{% elif status == 'CAPTURING' %}badge-warning{% else %}badge-secondary{% endif %}">
+                        Cam {{ id }}: {{ status }}
+                    </span>
+                {% endfor %}
+            </dd>
+        </dl>
     </div>
+    
     <div class="col">
         {% include 'components/backlight.html' %}
     </div>

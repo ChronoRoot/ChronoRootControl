@@ -49,7 +49,7 @@ class Config(object):
                         # Three cams : (1,2,3),(1,2,4),(2,3,4)
                         # Four cams : (1,2,3,4)
                         # the order inside the list is not important
-    CAM_WARMUP = 2
+    CAM_WARMUP = 3
     CAM_ADJUST_TIME = 10
 
     CAM_RETRIES = 10

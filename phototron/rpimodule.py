@@ -68,90 +68,118 @@ class RpiModule(object):
         return logger
 
     @staticmethod
-    def take_picture(xpid):
+    def take_picture(xpid, status_manager=None):
         """
-        Take the picture.
-
-        static method, only needs the experiment ID, parameters are stored in experiment
-        description json file
-
-        :param xpid: Ecperiment ID
-        :type event: string
-
-        :returns: boolean
-        :rtype: boolean
+        Takes the requested pictures. 
         """
+        
+        # --- Helper for UI reporting ---
+        def report(state=None, cam_id=None, cam_status=None, last_pic=False):
+            if status_manager:
+                status_manager.update_hardware_status(
+                    state=state, 
+                    cam_id=cam_id, 
+                    cam_status=cam_status, 
+                    last_pic=last_pic
+                )
 
         rpi = RpiModule()
-        rpi.logger.info('taking picture for task : %s. RpiModule obj ref : %s'%(xpid, rpi))
+        rpi.logger.info(f'taking picture for task : {xpid}')
         light = rpi.light
         exp = Experiment(directory=os.path.join(Config.WORKING_DIR, xpid))
 
         cameras = exp.cameras
         params = exp.img_params
 
-        #test the multiplexer
+        # ---------------------------------------------------------
+        # 1. Pre-Check: Multiplexer Self-Check
+        # ---------------------------------------------------------
+        
         if not rpi.selector.self_check():
-            rpi.logger.error('Multiplexer failure')
-            #put info in json file ..
-            exp.state = "FAILED"
-            exp.message = "Multiplexer error fatal error"
+            rpi.logger.error('Multiplexer fatal error during self-check')
+            report(state="MULTIPLEXER_ERROR")
+            exp.status = "FAILED"
+            exp.message = "Multiplexer fatal error"
             exp.dump()
             return False
+        
+        report(state="MULTIPLEXER_READY")
 
-        #camera is used -> Experiment in progress ?
-        ## wait a while ...
+        # ---------------------------------------------------------
+        # 2. Acquisition Loop
+        # ---------------------------------------------------------
+        
         retries = 0
         while retries < Config.CAM_RETRIES:
             retries += 1
             try:
+                # Attempt to get lock
                 with rpi.lock.acquire():
-                    rpi.logger.info('lock acquired')
-                    #TURN THE LIGHTS
+                    rpi.logger.info('Hardware lock acquired')
+
+                    # --- A. Turn Lights ON ---
                     if exp.ir:
-                        rpi.logger.info('turning lights ON')
                         light.state = Light.ON
                         params["exposure_mode"] = "backlight"
                     else:
-                        rpi.logger.info('turning lights OFF')
                         light.state = Light.OFF
 
-                    rpi.logger.info('rpimodule requested cams list : %s' % cameras)
+                    # --- B. Execute Capture Sequence ---
+                    step_images = []
+                    
+                    try:
+                        for camera in cameras:
+                            if camera not in Config.CAMS:
+                                continue 
 
-                    step = []
-                    for camera in cameras:
-                        rpi.logger.debug('Started image capture on cam %s.' % camera)
-                        if camera in Config.CAMS:
+                            report(cam_id=camera, cam_status="CAPTURING")
+                            
+                            # Prepare filenames
                             instant_date = arrow.now().format('YYYY-MM-DD_HH-mm-ss')
-                            #create cam folder & add cam_folder path to imagepath
-                            camdir = os.path.join(exp.workdir, "%s"%camera)
-                            rpi.logger.debug('Image directory path %s'%camdir)
-                            if not os.path.isdir(camdir):
-                                os.mkdir(camdir)
+                            camdir = os.path.join(exp.workdir, str(camera))
+                            os.makedirs(camdir, exist_ok=True)
+                            imagepath = os.path.join(camdir, f'{instant_date}_{camera}.png')
 
-                            imagepath = os.path.join(camdir, '%s_%s.png' % (instant_date, camera))
-                            ##CAPTURE IMAGE
-                            if rpi.selector.capture(camera, imagepath, params):
-                                step.append((instant_date, camera, imagepath))
+                            # CAPTURE
+                            success = rpi.selector.capture(camera, imagepath, params)
+
+                            if success:
+                                step_images.append((instant_date, camera, imagepath))
+                                report(cam_id=camera, cam_status="OK", last_pic=True)
                             else:
-                                exp.message = "Camera %s was buissy. Skipped step" % camera
-                        else:
-                            rpi.logger.info('Requested camera (%s) is not present in config file. Please check config.py file.'%(camera))
+                                rpi.logger.error(f"Camera {camera} failed (busy/glitch). Flagging MULTIPLEXER_ERROR.")
+                                
+                                # Mark this specific cam as failed
+                                report(cam_id=camera, cam_status="FAILED")
+                                
+                                light.state = Light.OFF 
+                                return False
 
-                    if light.state:
-                        rpi.logger.info('turning lights OFF')
-                        light.state = Light.OFF
-                    if len(step) > 0:
-                        exp.new_step(tuple(step))
+                    except Exception as e:
+                        # Unexpected crash (IOError, etc)
+                        rpi.logger.error(f"Critical error on Cam {camera}: {e}")
+                        
+                        report(cam_id=camera, cam_status="HW_ERROR")
+                        report(state="MULTIPLEXER_ERROR")
+                        
+                        light.state = Light.OFF 
+                        return False
+
+                    # --- C. Success Path ---
+                    light.state = Light.OFF  # Immediate cleanup
+                    
+                    if len(step_images) > 0:
+                        exp.new_step(tuple(step_images))
                         exp.message = "OK"
-                    # exp.dump()
-                    return True
+                        rpi.logger.info("Sequence completed successfully.")
+                        return True
+                    else:
+                        rpi.logger.warning("No images captured (Camera list was empty?).")
+                        return False
+
             except Timeout:
-                print("Another instance of this application currently holds the lock.")
-            finally:
-                if rpi.lock.is_locked:
-                    rpi.lock.release()
-                    rpi.logger.info('lock release forced')
-                rpi.logger.info('lock is now free for other experiments')
-        rpi.logger.error('Could not acquire cameras after %s retries.'%Config.CAM_RETRIES)
+                rpi.logger.warning(f"Lock busy. Retry {retries}/{Config.CAM_RETRIES}")
+                time.sleep(Config.CAM_WAIT_AFTER_RETRAY)
+
+        rpi.logger.error('Could not acquire hardware lock.')
         return False

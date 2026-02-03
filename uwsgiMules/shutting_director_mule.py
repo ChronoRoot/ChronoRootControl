@@ -27,7 +27,6 @@ import logging
 import tzlocal
 from config import Config
 
-
 logging.basicConfig(filename=Config.SHDL_LOG_FILE,
                     level=Config.LOG_LEVEL,
                     format=Config.LOG_FORMAT)
@@ -102,7 +101,7 @@ def shed_evt_job_executed(event):
     if exp.status != "RUNNING":
         exp.status = "RUNNING"
         exp.dump()
-    scheduler_status.refresh_scheduler_status()
+    scheduler_status.refresh_scheduler_status() 
     return
 scheduler.add_listener(shed_evt_job_executed, EVENT_JOB_EXECUTED)
 
@@ -146,7 +145,7 @@ def shed_evt_job_removed(event):
 
     expid = event.job_id
     print("Job removed %s" % expid)
-    schedulerstatus.remove_experiment(expid)
+    scheduler_status.remove_experiment(expid)
     return
 scheduler.add_listener(shed_evt_job_removed, EVENT_JOB_REMOVED)
 
@@ -295,34 +294,34 @@ class ChiefOperator(object):
         return
 
     def create_and_schedule(self, exp_id):
-        """handle experiment creation and schedule
-
-        :param: expid
-        :rtype: string
-        :returns: None
-        :rtype: None
-        """
+        """handle experiment creation and schedule"""
 
         self.logger.info("create_and_schedule")
         exp = Experiment(directory=os.path.join(Config.WORKING_DIR, exp_id))
-        end = arrow.get(exp.end).format('YYYY-MM-DD HH:mm:ss')
-        if datetime.fromisoformat(end).replace(tzinfo=None) < datetime.now():
+        
+        # Get the end date as a proper datetime object to prevent immediate expiration
+        end_dt = arrow.get(exp.end).datetime
+        
+        if end_dt.replace(tzinfo=None) < datetime.now():
             end_experiment(exp)
             return
+
         exp.status = "RUNNING"
         exp.message = "Added to the scheduler at %s" % datetime.now().isoformat()
 
-        ##scheduler accepts loosely converted strings
+        # Clean string for start date
         start = arrow.get(exp.start).format('YYYY-MM-DD HH:mm:ss').replace('+0000', '')
 
-        job = scheduler.add_job(RpiModule.take_picture, ## PICTURE IT !
-                        args=(exp_id,),
+        # Pass scheduler_status in args tuple
+        job = scheduler.add_job(RpiModule.take_picture,
+                        args=(exp_id, scheduler_status), # Added scheduler_status
                         trigger='interval',
                         start_date=start,
-                        end_date=end,
+                        end_date=end_dt,               # Use datetime object
                         minutes=exp.interval,
                         id=exp.expid,
                         replace_existing=True)
+
         self.logger.info("Exp %s scheduled for %s"%(exp.expid, job.next_run_time))
         exp.dump()
         scheduler_status.refresh_scheduler_status()
