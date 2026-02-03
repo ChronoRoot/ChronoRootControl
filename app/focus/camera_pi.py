@@ -11,23 +11,31 @@ class Camera(BaseCamera):
     
     @staticmethod
     def frames(cam_id):
-        print("frames called from %s on cam %s"% (__class__, cam_id))
-        iv = ivport.IVPort(ivport.TYPE_QUAD2)
+        print("frames called from %s on cam %s" % (__class__, cam_id))
         
-        print("change to cam %s" % cam_id)
-        iv.camera_change(cam_id)
+        # 1. Initialize Multiplexer & Switch
 
+        iv = ivport.IVPort(ivport.TYPE_QUAD2)
+        print("Switching IVPort to cam %s" % cam_id)
+        iv.camera_change(cam_id)
+        
+        time.sleep(1.0)  # Allow time for the camera switch to take effect
+
+        # 2. Initialize Camera with Focus/Grayscale settings
         with picamera.PiCamera() as camera:
-            # let camera warm up
-            time.sleep(0)
+            camera.resolution = (800, 600) 
+            camera.framerate = 24
+
+            # Set to Grayscale
+            camera.color_effects = (128, 128)
+            camera.exposure_mode = 'backlight'
+            time.sleep(1.5)
 
             stream = io.BytesIO()
-            for foo in camera.capture_continuous(stream, 'jpeg',
-                                                 use_video_port=True):
-                # return current frame
+            
+            for foo in camera.capture_continuous(stream, 'jpeg', use_video_port=True):
                 stream.seek(0)
                 yield stream.read()
 
-                # reset stream for next frame
                 stream.seek(0)
                 stream.truncate()
