@@ -174,7 +174,7 @@ class IVPort_v2(Selector):
         try:
             # Switch the mux
             self.iv.camera_change(camera_id)
-            time.sleep(0.2)
+            time.sleep(Config.CAM_WARMUP)
             
             # Check if an I2C device exists at 0x10 (Standard for Pi Cam)
             # Use i2cget -y 1 0x10

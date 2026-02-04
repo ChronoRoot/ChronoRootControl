@@ -7,11 +7,51 @@
 <h1 class="mt-5">Camera {{ cam_id }} preview</h1>
 
 <div class="row mt-5">
-    <div class="col">
-        <img src="{{ url_for('focus_page.video_feed', cam_id=cam_id) }}"/>
+    <div class="col-lg-9">
+        
+        {% if is_locked %}
+            <div class="card border-warning shadow-sm">
+                <div class="card-body text-center p-5">
+                    <div class="text-warning mb-3">
+                        <i class="fas fa-lock fa-4x"></i>
+                    </div>
+                    <h3 class="card-title text-dark">Hardware Unavailable</h3>
+                    <p class="lead">
+                        The camera module is currently locked by: <br>
+                        <span class="badge badge-warning mt-2" style="font-size: 1rem;">
+                            {{ lock_owner }}
+                        </span>
+                    </p>
+                    <hr>
+                    <div class="text-muted text-left mx-auto" style="max_width: 500px;">
+                        <ul class="mb-4">
+                            <li>If an <strong>Experiment</strong> is running, please wait for it to finish.</li>
+                            <li>If this is another <strong>Browser Tab</strong> (or you just refreshed), please wait 5 seconds for the lock to release.</li>
+                        </ul>
+                    </div>
+                    
+                    <a href="{{ request.url }}" class="btn btn-warning btn-lg text-white">
+                        <i class="fas fa-sync-alt mr-2"></i> Refresh Status
+                    </a>
+                </div>
+            </div>
+
+        {% else %}
+            <div class="card shadow-sm bg-dark">
+                <img src="{{ url_for('focus_page.video_feed', cam_id=cam_id) }}" class="img-fluid rounded" style="width: 100%; min-height: 480px; background-color: #000;"/>
+            </div>
+        {% endif %}
+
     </div>
-    <div class="col col-lg-3">
+
+    <div class="col-lg-3">
         {% include 'components/backlight.html' %}
+        
+        <div class="mt-3">
+             <a href="{{ url_for('config_page.conf') }}" class="btn btn-outline-secondary btn-block">
+                <i class="fas fa-arrow-left"></i> Back to Config
+            </a>
+        </div>
     </div>
 </div>
 

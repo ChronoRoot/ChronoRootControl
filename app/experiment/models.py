@@ -111,8 +111,8 @@ class Experiment(object):
 
     def status_update(self):
         self.schedulerstatus.load()
-        if self.expid in self.schedulerstatus.jobs_info:
-            self.next_run_time = self.schedulerstatus.jobs_info[self.expid]["next_run_time"]
+        if self.expid in self.schedulerstatus.state['jobs']:
+            self.next_run_time = self.schedulerstatus.state['jobs'][self.expid]["next_run_time"]
         else:
             self.next_run_time = "Not in the scheduler"
 
