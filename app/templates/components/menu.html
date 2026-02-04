@@ -8,7 +8,9 @@
         <div class="collapse navbar-collapse" id="navbarCollapse">
             <ul class="navbar-nav mr-auto">
                 <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('experiment_page.new_experiment')}}">New experiment <i class="fas fa-plus-circle"></i></a>
+                    <a class="nav-link" href="{{url_for('experiment_page.new_experiment')}}"> 
+                        <i class="fas fa-plus-circle"></i> New experiment 
+                    </a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link" href="{{ url_for('storage_page.index') }}">
@@ -16,13 +18,19 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('config_page.conf')}}">Configure <i class="fas fa-cogs"></i></a>
+                    <a class="nav-link" href="{{url_for('config_page.conf')}}"> 
+                        <i class="fas fa-cogs"></i> Configure 
+                    </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('help_page.help')}}">Help</a>
+                    <a class="nav-link" href="{{url_for('help_page.help')}}">
+                        <i class="fas fa-question-circle"></i> Help
+                    </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('help_page.help', page='about')}}">About</a>
+                    <a class="nav-link" href="{{url_for('help_page.help', page='about')}}">
+                        <i class="fas fa-info-circle"></i> About
+                    </a>
                 </li>
             </ul>
         </div>
