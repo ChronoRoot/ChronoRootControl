@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}
+    {{ config.SITE_NAME }}
+{% endblock %}
+
+{% block content %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="row mt-3">
+        <div class="col-12">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+  {% endif %}
+{% endwith %}
+
+<h1 class="mt-5 mb-4"><i class="fas fa-hdd mr-2"></i>Storage Management</h1>
+
+<div class="row">
+    <div class="col-lg-7 mb-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">Active Storage</h5>
+            </div>
+            <div class="card-body">
+                <h6 class="text-muted">Current Path: <code>{{ info.path }}</code></h6>
+                
+                <div class="progress mb-2" style="height: 30px;">
+                    <div class="progress-bar {% if info.percent > 90 %}bg-danger{% elif info.percent > 70 %}bg-warning{% else %}bg-info{% endif %}" 
+                            role="progressbar" style="width: {{ info.percent }}%">
+                        {{ info.percent }}% Used
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between text-muted small mb-3">
+                    <span>{{ info.used_gb }} GB Used</span>
+                    <span>Total: {{ info.total_gb }} GB ({{ info.free_gb }} GB Free)</span>
+                </div>
+                
+                {% if info.is_mounted %}
+                    <div class="alert alert-success py-2 mb-0">
+                        <i class="fas fa-check-circle mr-2"></i> Using External/Mounted Drive
+                    </div>
+                {% else %}
+                    <div class="alert alert-warning py-2 mb-0">
+                        <i class="fas fa-exclamation-triangle mr-2"></i> Using Internal SD Card Storage
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5 mb-4">
+        <div class="card shadow-sm h-100 border-info">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-cogs mr-2"></i>Change Location</h5>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">Select a mounted drive to use for storing experiments.</p>
+                
+                <form action="{{ url_for('storage_page.set_path') }}" method="POST">
+                    <div class="form-group">
+                        <label for="mountSelect">Available Mounts:</label>
+                        <select class="form-control" name="new_path" id="mountSelect">
+                            {% for m in mounts %}
+                                <option value="{{ m.mountpoint }}" {% if info.path.startswith(m.mountpoint) %}selected{% endif %}>
+                                    {{ m.device }} ({{ m.mountpoint }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-info btn-block" onclick="return confirm('This will update the configuration file and restart the web service. Continue?')">
+                        Set as Active & Save
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-12">
+        <div class="card shadow-sm border-secondary">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-plug mr-2"></i>Mount New Disks</h5>
+                <small>Auto-detects USB drives</small>
+            </div>
+            <div class="card-body">
+                <p class="card-text text-muted">Use this section to mount USB drives that are plugged in but not yet accessible. Drives mounted here will persist after reboot.</p>
+                
+                {% if unmounted %}
+                <div class="table-responsive">
+                    <table class="table table-striped table-bordered mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th style="width: 15%">Device</th>
+                                <th style="width: 10%">Size</th>
+                                <th style="width: 10%">Type</th>
+                                <th style="width: 15%">Current Label</th>
+                                <th>Mount Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for disk in unmounted %}
+                            <tr>
+                                <td class="align-middle text-monospace"><strong>/dev/{{ disk.name }}</strong></td>
+                                <td class="align-middle">{{ disk.size }}</td>
+                                <td class="align-middle">{{ disk.fstype }}</td>
+                                <td class="align-middle">{{ disk.label or 'None' }}</td>
+                                <td>
+                                    <form action="{{ url_for('storage_page.mount_drive') }}" method="POST" class="form-inline">
+                                        <input type="hidden" name="device_name" value="{{ disk.name }}">
+                                        <input type="hidden" name="device_uuid" value="{{ disk.uuid }}">
+                                        <input type="hidden" name="fstype" value="{{ disk.fstype }}">
+                                        
+                                        <div class="input-group w-100">
+                                            <div class="input-group-prepend">
+                                                <span class="input-group-text">Name</span>
+                                            </div>
+                                            <input type="text" class="form-control" name="label" 
+                                                   placeholder="usb_data" 
+                                                   value="{{ disk.label or 'usb_drive' }}" 
+                                                   required pattern="[a-zA-Z0-9_-]+"
+                                                   title="Alphanumeric, dashes, and underscores only">
+                                            <div class="input-group-append">
+                                                <button type="submit" class="btn btn-success">
+                                                    <i class="fas fa-plus-circle mr-2"></i> Mount
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                    <div class="alert alert-light text-center border mb-0">
+                        <h5 class="text-muted"><i class="fas fa-check-circle mr-2"></i>All connected drives are mounted</h5>
+                        <small>Plug in a new USB drive and refresh this page to see it here.</small>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% set allowed_exts = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.txt', '.log', '.csv', '.json', '.xml', '.py', '.sh', '.md', '.conf') %}
+
+<div class="row">
+    <div class="col-lg-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="fas fa-folder-open mr-2"></i>Data Explorer</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="thead-light">
+                            <tr>
+                                <th class="pl-4">Name</th>
+                                <th>Size</th>
+                                <th>Type</th>
+                                <th class="text-right pr-4">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in experiments %}
+                            
+                            {# Check if file is viewable based on extension #}
+                            {% set is_viewable = item.name.lower().endswith(allowed_exts) %}
+
+                            <tr>
+                                <td class="pl-4 align-middle">
+                                    {% if item.is_dir %}
+                                        <i class="fas fa-folder text-warning mr-2"></i> <strong>{{ item.name }}</strong>
+                                    {% else %}
+                                        {% if is_viewable %}
+                                            <i class="far fa-file-alt text-secondary mr-2"></i> {{ item.name }}
+                                        {% else %}
+                                            <i class="far fa-file text-muted mr-2"></i> <span class="text-muted">{{ item.name }}</span>
+                                        {% endif %}
+                                    {% endif %}
+                                </td>
+                                <td class="align-middle">{{ item.size }}</td>
+                                <td class="align-middle text-muted small">{{ item.files }}</td>
+                                <td class="text-right pr-4">
+                                    {% if item.is_dir %}
+                                        <a href="{{ url_for('storage_page.browse', subpath=item.name) }}" class="btn btn-sm btn-outline-primary">
+                                            <i class="fas fa-eye mr-1"></i> Browse
+                                        </a>
+                                    {% else %}
+                                        {% if is_viewable %}
+                                            <a href="{{ url_for('storage_page.browse', subpath=item.name) }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                                                <i class="fas fa-external-link-alt mr-1"></i> Open
+                                            </a>
+                                        {% endif %}
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="text-center py-5 text-muted">
+                                    <i class="far fa-folder-open fa-3x mb-3"></i><br>
+                                    Folder is empty: <code>{{ info.path }}</code>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

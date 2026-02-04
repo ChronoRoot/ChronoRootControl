@@ -15,7 +15,7 @@ from app.focus import focus_page
 from config import Config
 
 from app.experiment.models import Experiment
-
+from app.storage import storage_page
 
 """
 Creation and configuration of the flask application
@@ -39,6 +39,7 @@ app.register_blueprint(api_exp, url_prefix='/api')
 app.register_blueprint(help_page, url_prefix='/help')
 app.register_blueprint(config_page, url_prefix='/config')
 app.register_blueprint(focus_page, url_prefix='/preview')
+app.register_blueprint(storage_page, url_prefix='/storage')
 
 app.logger.setLevel(logging.INFO)
 formatter = logging.Formatter(Config.LOG_FORMAT)
