@@ -28,7 +28,7 @@ def conf():
     """
     Device settings page
     """
-    now = '{0:%Y-%m-%d %H:%M:%S}'.format(datetime.now())
+    now = datetime.now().strftime(Config.PRETTY_FORMAT)
     rpi = RpiModule()
     light = rpi.light
     scheduler_info = SchedulerStatus().get_info()
@@ -42,7 +42,7 @@ def conf():
         retval = setSystemTime(new_date, network=False)
 
         if retval == 0:
-            readable_date = new_date.strftime('%Y-%m-%d %H:%M:%S')
+            readable_date = new_date.strftime(Config.PRETTY_FORMAT)
             flash('System date successfully changed to: %s' % readable_date, 'success')
         else:
             flash('Error: Date change failed. System said: %s' % retval, 'danger')
@@ -73,7 +73,7 @@ def setSystemTime(mydate, network=True):
     if network:
         pass
     else:
-        datestring = '{0:%Y-%m-%d %H:%M:%S}'.format(mydate)
+        datestring = mydate.strftime(Config.PRETTY_FORMAT)
         p = subprocess.Popen('date -s "%s"'%datestring, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output = b""
         for line in p.stdout.readlines():

@@ -22,6 +22,10 @@ class Config(object):
     SELECTOR_TYPE = "TYPE_QUAD2" #possible values : TYPE_QUAD, TYPE_QUAD2, TYPE_DUAL, TYPE_DUAL2
     CAMERA_TYPE = "RPICAM"
 
+    # Unified Date Format
+    DATE_FORMAT = '%Y-%m-%d_%H-%M-%S' 
+    PRETTY_FORMAT = '%Y-%m-%d %H:%M:%S' # For UI/Logs
+    
     MULE_NO = 1
 
     APP_ROOT = os.path.dirname(os.path.realpath(__file__))

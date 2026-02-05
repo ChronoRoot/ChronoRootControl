@@ -10,20 +10,15 @@ from config import Config
 from flask import (Blueprint, abort, flash, redirect, render_template, request,
                    url_for)
 from wtforms import SelectMultipleField, TextAreaField
+from datetime import datetime
 
 experiment_page = Blueprint('experiment_page', __name__,
                             template_folder='templates',
                             static_folder='static')
 
-
-
 @experiment_page.route('/', methods=['GET', 'POST'])
 def new_experiment():
-    """
-    Creation of a new experiment
-    """
     form = SettingsForm()
-
     for name, item in form.camera.settings.items():
         if item['type'] == 'list':
             tmpfield = SelectMultipleField( name,
@@ -33,55 +28,72 @@ def new_experiment():
                                             description=name)
             setattr(form, name, tmpfield)
 
+
+    # Create a BLANK experiment. It has no ID yet.
+    exp = Experiment() 
     actions = "new"
-    exp = Experiment()
 
     if form.validate_on_submit():
-        form.populate_obj(exp)
-        exp.create()
-        flash('Experience %s was added' % exp.expid, 'success')
-    return render_template('experiment.html', form=form, exp=exp,
-                            config=Config, actions=actions)
+        if form.validate_overlap():
+            # Populate the blank object
+            form.populate_obj(exp)
+            exp.status = "NEW"
+            # This triggers generate_id() -> creates folder -> saves json -> notifies scheduler
+            exp.create() 
+            
+            flash('Launched! ID: %s' % exp.expid, 'success')
+            return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+        else:
+             flash('Scheduling conflict.', 'danger')
 
+    return render_template('experiment.html', form=form, exp=exp, config=Config, 
+                           actions=actions, now=datetime.now().strftime(Config.PRETTY_FORMAT))
 
 @experiment_page.route('/<expid>', methods=['GET', 'POST'])
-def setuped_experiment(expid):
-    """
-    Edit an existing experiemnt
-
-    Args:
-      expid : str
-        The experiment id
-
-    GET: display
-    POST: three action possible
-       - edit
-       - cancel
-       - delete
-    """
+def setuped_experiment(expid):   
     try:
-        exp = Experiment(directory=os.path.join(Config.WORKING_DIR, expid))
+        exp = Experiment.load_from_id(expid)
     except FileNotFoundError:
         abort(404)
+        
     form = SettingsForm(obj=exp)
-    if request.method == 'POST':
-        if request.form['action'] == "edit":
-            if form.validate_on_submit():
-                form.populate_obj(exp)
-                exp.create()
-                flash('The experiment %s has been modified' % exp.expid, 'info')
-        elif request.form['action'] == "cancel":
-            exp.cancel()
-            flash('The experiment %s has been canceled' % exp.expid, 'warning')
-        elif request.form['action'] == "delete":
-            exp.delete()
-            flash('The experiment %s has been deleted' % exp.expid, 'danger')
-            # return redirect(url_for('main_page.experiment_status'))
-    if exp.status in ["ENDED", "Error", "Canceled"]:
-        actions = "readonly"
+
+    # 1. Determine permissions based on Status
+    if exp.status in ["NEW", "SCHEDULED"]:
+        actions = "editable"
+    elif exp.status == "SETUP":
+        actions = "new"
     elif exp.status == "RUNNING":
         actions = "cancelable"
     else:
-        actions = "editable"
+        actions = "readonly"
+
+    if request.method == 'POST':
+        action = request.form['action']
+
+        # 2. Handle SAVE (Only if allowed)
+        if action == "save" and actions == "editable":
+            if form.validate_on_submit():
+                # Optional: You might want to run form.validate_overlap() here too
+                form.populate_obj(exp)
+                exp.create() # Saves changes to JSON
+                flash('Changes saved successfully.', 'success')
+                # Reload to show new values
+                return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+            else:
+                flash('Error saving changes. Check the form.', 'danger')
+
+        # 3. Handle CANCEL
+        elif action == "cancel" and actions in ["editable", "cancelable"]:
+            exp.cancel()
+            flash('The experiment %s has been canceled' % exp.expid, 'warning')
+            return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+
+        # 4. Handle DELETE
+        elif action == "delete":
+            exp.delete()
+            flash('The experiment %s has been deleted' % exp.expid, 'danger')
+            return redirect(url_for('experiment_page.new_experiment')) # Redirect to home/new after delete
+
     return render_template('experiment.html', form=form, exp=exp, config=Config,
-                           actions=actions)
+                           actions=actions, now=datetime.now().strftime(Config.PRETTY_FORMAT))

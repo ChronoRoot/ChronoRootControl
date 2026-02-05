@@ -25,13 +25,13 @@ class SettingsForm(Form):
                         validators=[Optional()],
                         description='About this experiment')
     
-    # 24-hour format enforced in display_format
+    # Use Config.PRETTY_FORMAT (No %z)
     start = DateTimeField("Start Time",
-                          display_format='%Y-%m-%d %H:%M:%S %z',
+                          display_format=Config.PRETTY_FORMAT,
                           default=datetime.datetime.now)
                           
     end = DateTimeField("End Time",
-                        display_format='%Y-%m-%d %H:%M:%S %z',
+                        display_format=Config.PRETTY_FORMAT,
                         default=datetime.datetime.now)
                         
     interval = IntegerField("Interval (minutes)",
@@ -63,7 +63,6 @@ class SettingsForm(Form):
         """
         Validate interval is at least 10 minutes
         """
-        # We handle the logic here, not in the HTML
         if field.data < 10:
             raise ValidationError("Interval too short. Minimum time between pictures is 10 minutes.")
 
@@ -72,8 +71,13 @@ class SettingsForm(Form):
         Validate start time is at least 1 minute in the future
         """
         if field.data:
-            now = datetime.datetime.now(field.data.tzinfo)
-            if field.data < now + datetime.timedelta(minutes=1):
+            # --- FIX: FORCE NAIVE DATETIME ---
+            # Even if the form parser detects a timezone, we strip it 
+            # to ensure we compare against naive Server Time.
+            start_naive = field.data.replace(tzinfo=None)
+            
+            now = datetime.datetime.now()
+            if start_naive < now + datetime.timedelta(minutes=1):
                 raise ValidationError("Start time must be at least 1 minute in the future.")
 
     def validate_end(self, field):
@@ -81,6 +85,42 @@ class SettingsForm(Form):
         Validate end time is at least 10 minutes after start time
         """
         if field.data and self.start.data:
+            # Force naive for comparison
+            end_naive = field.data.replace(tzinfo=None)
+            start_naive = self.start.data.replace(tzinfo=None)
+            
             min_duration = datetime.timedelta(minutes=10)
-            if field.data < (self.start.data + min_duration):
+            if end_naive < (start_naive + min_duration):
                 raise ValidationError("Duration too short. Experiment must run for at least 10 minutes.")
+            
+    def validate_overlap(self, current_exp_id=None):
+        """
+        Custom validator to call manually in the view.
+        Returns True if valid, False if conflict found (and adds error to form).
+        """
+        from app.experimentlist.models import ExperimentList
+        
+        exp_list = ExperimentList()
+        
+        # --- FIX: FORCE NAIVE BEFORE PASSING TO LOGIC ---
+        # The experiment list contains naive datetimes (from JSON).
+        # We must ensure our inputs are also naive.
+        s_naive = self.start.data.replace(tzinfo=None) if self.start.data else None
+        e_naive = self.end.data.replace(tzinfo=None) if self.end.data else None
+        
+        if not s_naive or not e_naive:
+            return False
+
+        conflict_exp = exp_list.find_conflict(
+            s_naive, 
+            e_naive, 
+            ignore_id=current_exp_id
+        )
+
+        if conflict_exp:
+            # Using strftime for standard formatting
+            msg = f"Time Conflict! Overlaps with running experiment: {conflict_exp.expid} ({conflict_exp.start.strftime('%H:%M')} - {conflict_exp.end.strftime('%H:%M')})"
+            self.start.errors.append(msg)
+            return False
+            
+        return True

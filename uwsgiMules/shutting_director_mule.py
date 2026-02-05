@@ -1,354 +1,271 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-'''
-Created on 15 mars 2018
-@author: Vladimir Daric
-
-uWisgi mule module
-
-
-This module is executed by uWisgi mule
-it initialises the scheduler and than starts a loop to listen for messages
-from the web app
-'''
 import os
 import uwsgi
-from phototron.rpimodule import RpiModule
-from app.experiment.models import Experiment ### from webapp.models import Experiment
-from app.options.schedulerstatus import SchedulerStatus
+import logging
+from datetime import datetime
+from flask import json, Flask
+
+# APScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.events import *
-from datetime import datetime
-from flask import json
-import arrow
-import logging
-import tzlocal
+
+# App Modules
 from config import Config
+
+# --- FLASK CONTEXT FIX ---
+app_flask = Flask(__name__)
+app_flask.config.from_object(Config)
+app_ctx = app_flask.app_context()
+app_ctx.push()
+
+from phototron.rpimodule import RpiModule
+from app.experiment.models import Experiment
+from app.experimentlist.models import ExperimentList 
+from app.options.schedulerstatus import SchedulerStatus
 
 logging.basicConfig(filename=Config.SHDL_LOG_FILE,
                     level=Config.LOG_LEVEL,
                     format=Config.LOG_FORMAT)
-
 log = logging.getLogger(__name__)
 
-
-#scheduler initialisation
-
+# --- SCHEDULER SETUP ---
 try:
     scheduler
 except NameError:
-    scheduler = BackgroundScheduler(executors={'default': ThreadPoolExecutor(1)})
-
-# Scheduler status file handling
+    scheduler = BackgroundScheduler(executors={'default': ThreadPoolExecutor(2)})
 
 try:
     scheduler_status
 except NameError:
     scheduler_status = SchedulerStatus(scheduler, log)
 
-handler = logging.FileHandler(Config.SHDL_LOG_FILE, mode='a')
-handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
-#handler.setLevel(logging.INFO)
-if (log.hasHandlers()):
-    log.handlers.clear()
-    log.addHandler(handler)
+# --- HELPER FUNCTIONS ---
 
-log.info('Director loaded')
-
-if not scheduler.running:
-    log.info('Scheduler is not running')
-    scheduler.start()
-    log.info('Scheduler started: %s'%scheduler.running)
-    scheduler_status.refresh_scheduler_status()
-else:
-    log.info('Scheduler already started')
-    scheduler_status.refresh_scheduler_status()
-    pass
+def load_exp_safe(expid):
+    try:
+        return Experiment.load_from_id(expid)
+    except FileNotFoundError:
+        log.error(f"Scheduler Error: Experiment {expid} file not found.")
+        return None
 
 def end_experiment(exp):
+    if not exp: return
     scheduler_status.remove_experiment(exp.expid)
-    exp.status = "ENDED"
-    exp.dump()
+    exp.status = "FINISHED"
+    exp.save()
 
-#####
-## Callback functions
-#      capture scheduler events
+# --- SCHEDULER CALLBACKS ---
+
 def shed_evt_job_executed(event):
-    """
-    Scheduler event listener callback function,
-    triggered by the scheduler on a job execution event
+    exp = load_exp_safe(event.job_id)
+    if not exp: return
 
-    When called this function updates the experiment status.
-
-    :param event: event object sent by scheduler
-    :type event: event
-
-    :returns: None
-    :rtype: None
-    """
-
-    expid = event.job_id
-    exp = Experiment(directory=os.path.join(Config.WORKING_DIR, expid))
-    job = scheduler.get_job(expid)
-    if job is None:
+    job = scheduler.get_job(event.job_id)
+    
+    # If the job is finished (no next run time), mark as FINISHED
+    if job is None or job.next_run_time is None:
         end_experiment(exp)
         return
-    if job.next_run_time < datetime.now(tzlocal.get_localzone()):
-        end_experiment(exp)
-        return
-    if exp.status != "RUNNING":
+
+    # If it was SCHEDULED, NEW, or ERROR, but it just ran successfully, set it to RUNNING.
+    if exp.status in ["SCHEDULED", "NEW", "ERROR"]:
         exp.status = "RUNNING"
-        exp.dump()
-    scheduler_status.refresh_scheduler_status() 
-    return
-scheduler.add_listener(shed_evt_job_executed, EVENT_JOB_EXECUTED)
-
-def shed_evt_job_added(event):
-    """Scheduler event listener callback function,
-    triggered when a job is added to scheduler
-
-    When called this function updates the experiment status.
-
-    :param event: event object sent by scheduler
-    :type event: event
-
-    :returns: None
-    :rtype: None
-    """
-
-    expid = event.job_id
-    exp = Experiment(directory=os.path.join(Config.WORKING_DIR, expid))
-    if exp.status != "RUNNING":
-        exp.status = "RUNNING"
-        exp.message = "Added to the scheduler at %s" % datetime.now().isoformat()
-        exp.dump()
+        exp.message = "Running successfully."
+        exp.save()
+        log.info(f"Experiment {exp.expid} recovered/started -> RUNNING")
+    
+    # Always refresh status so the UI shows the correct 'next_run_time'
     scheduler_status.refresh_scheduler_status()
-    return
-scheduler.add_listener(shed_evt_job_added, EVENT_JOB_ADDED)
-
-
-def shed_evt_job_removed(event):
-    """Scheduler event listener callback function,
-    triggered when on job removal from scheduler
-    (this fonction is normally never called)
-
-    When called this function updates the experiment status.
-
-    :param event: event object sent by scheduler
-    :type event: event
-
-    :returns: None
-    :rtype: None
-    """
-
-    expid = event.job_id
-    print("Job removed %s" % expid)
-    scheduler_status.remove_experiment(expid)
-    return
-scheduler.add_listener(shed_evt_job_removed, EVENT_JOB_REMOVED)
-
-def shed_evt_job_modified(event):
-    """Scheduler event listener callback function,
-    triggered when a job is modified in scheduler
-    (this fonction is normally never called)
-
-
-    :param event: event object sent by scheduler
-    :type event: event
-
-    :returns: None
-    :rtype: None
-    """
-
-    print("Job modified %s" % event.job_id)
-    scheduler_status.refresh_scheduler_status()
-    return
-scheduler.add_listener(shed_evt_job_modified, EVENT_JOB_MODIFIED)
-
 
 def shed_evt_job_error(event):
-    """Scheduler event listener callback function,
-    triggered when scheduler report job execution error
+    exp = load_exp_safe(event.job_id)
+    if not exp: return
 
-    When called this function updates the experiment status.
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    error_msg = str(event.exception)
 
-    """
+    # 1. Log the failure in the experiment history (Timeline)
+    # This ensures you see the red row in the "Event Logs" table
+    new_log = {
+        "id": len(exp.logs) + 1,
+        "status": "ERROR", 
+        "date": timestamp,
+        "cameras": [],
+        "info": f"Capture Failed: {error_msg}",
+        "files": []
+    }
+    
+    # Ensure the list exists before appending
+    if not hasattr(exp, 'logs'):
+        exp.logs = []
+    exp.logs.append(new_log)
 
-    expid = event.job_id
-    exp = Experiment(directory=os.path.join(Config.WORKING_DIR, expid))
-    message = "Job execution failed. Error : %s" % event.exception
-    if exp.message != message:
-        exp.message = message
-        exp.status = "ERROR"
-        exp.dump()
-    scheduler_status.set_exp_status(expid, "ERROR")
-    return
-scheduler.add_listener(shed_evt_job_error, EVENT_JOB_ERROR)
+    # 2. Hard Fail the Status (Triggers your reboot handler)
+    exp.status = "ERROR"
+    exp.message = f"Job Failed at {timestamp}: {error_msg}"
+    exp.save()
 
-def shed_evt_job_missed(event):
-    """Callback function,
-    triggered when a job is is missed by the scheduler
+    # 3. Update memory status
+    scheduler_status.set_exp_status(event.job_id, "ERROR")
+    log.error(f"Experiment {exp.expid} failed. Status set to ERROR.")
 
-    :param event: event object sent by scheduler
-    :type event: event
+# Register Listeners
+scheduler.add_listener(shed_evt_job_executed, EVENT_JOB_EXECUTED)
+scheduler.add_listener(shed_evt_job_error, EVENT_JOB_ERROR | EVENT_JOB_MISSED)
 
-    :returns: None
-    :rtype: None
-    """
-
-    expid = event.job_id
-    exp = Experiment(directory=os.path.join(Config.WORKING_DIR, expid))
-    message = "Step missed. Error : %s" % event.exception
-    if exp.message != message:
-        exp.message = message
-        exp.status = "ERROR"
-        exp.dump()
-    scheduler_status.set_exp_status(expid, "ERROR")
-    return
-scheduler.add_listener(shed_evt_job_missed, EVENT_JOB_MISSED)
-
-
-
+# --- CHIEF OPERATOR ---
 
 class ChiefOperator(object):
-    """class loaded by the uWisgi mule
-
-    This class implements the mainLoop method.
-    When executed in uWisgi mule, this loop lisenen to messages from
-    the web app.
-    """
-
     def __init__(self):
-        """Init : Logger set-up
-        """
-
-        self.logger = self.logger()
-        self.logger.info("ChiefOperator object initialized: %s"%self)
-
-    def logger(self):
-        """ChiefOperator logger
-        """
-
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.DEBUG)
-        return logger
+        self.logger = logging.getLogger(__name__)
 
     @staticmethod
     def mainLoop():
-        """loop, listens to webApp messages
-        """
-        # listen for messages from webapp
         cop = ChiefOperator()
-        going_on = True
-        while going_on:
-            cop.logger.info("ChiefOperator: mainLoop started from %s"%cop)
+        try:
+            cop.resync_with_disk()
+            
+            if not scheduler.running:
+                cop.logger.info("Starting Scheduler...")
+                scheduler.start()
+                cop.logger.info("Scheduler Started.")
+                
+        except Exception as e:
+            cop.logger.critical(f"CRASH during startup: {e}")
+            # Prevent tight loop restart if it's a code error
+            import time
+            time.sleep(10)
+            return 
+
+        while True:
             try:
                 xpid, action = cop.getMessage()
                 cop.handle_experiment(xpid, action)
             except Exception as e:
-                cop.logger.error("ChiefOperator: somethong gone wrong in the mainLoop: %s"%e)
-                going_on = False
-                raise e
+                cop.logger.error(f"MainLoop Error: {e}")
 
     def getMessage(self):
-        """WebApp message getter
-
-        uses uWsgi message mecanism to recieve messages from the web app
-
-        :returns: expid
-        :rtype: string
-        :returns: action
-        :rtype: string
-        """
-
         while True:
             try:
-                message = json.loads(uwsgi.mule_get_msg())
-                expid = message['id']
-                action = message['action']
-                self.logger.info("Got message: %s, %s"% (expid, action))
-            except:
-                raise
-            if message is not None:
-                break
-        return expid, action
+                msg_raw = uwsgi.mule_get_msg()
+                if not msg_raw: continue 
+                message = json.loads(msg_raw)
+                return message.get('id'), message.get('action')
+            except Exception as e:
+                self.logger.error(f"Message Decode Error: {e}")
 
     def handle_experiment(self, xpid, action):
-        """handle the requested action"""
-
+        self.logger.info(f"Handling: {action} on {xpid}")
         try:
-            {
-                'CREATE': self.create_and_schedule,
-                'CANCEL': self.sched_cancel_xp,
-                'CHECK_HARDWARE': self.check_hardware  
-            }[action](xpid)
-        except KeyError:
-            self.logger.error(f"Unimplemented action: {action}")
-        return
+            if action == 'CREATE':
+                self.schedule_job(xpid)
+            elif action == 'CANCEL':
+                self.cancel_job(xpid)
+            elif action == 'CHECK_HARDWARE':
+                self.check_hardware(xpid)
+            else:
+                self.logger.warning(f"Unknown action: {action}")
+        except Exception as e:
+            self.logger.error(f"Handle Error: {e}")
 
-    def check_hardware(self, xpid=None):
-        """
-        Triggered by 'CHECK_HARDWARE' action in the mule.
-        """
-        self.logger.info("ChiefOperator: Triggering hardware diagnostic scan.")        
-        results = RpiModule.check_cameras(status_manager=scheduler_status)
-        return results
-    
-    def create_and_schedule(self, exp_id):
-        """handle experiment creation and schedule"""
+    def resync_with_disk(self):
+        self.logger.info("--- Resyncing Scheduler with Disk ---")
+        exp_list = ExperimentList()
+        running_jobs = {job.id for job in scheduler.get_jobs()}
+        
+        for exp in exp_list.exps:
+            # IGNORE SYSTEM / DIAGNOSTICS
+            if exp.expid == 'system' or exp.status == 'DIAGNOSTICS':
+                continue
 
-        self.logger.info("create_and_schedule")
-        exp = Experiment(directory=os.path.join(Config.WORKING_DIR, exp_id))
+            if exp.status in ['CANCELLED', 'FINISHED']:
+                continue
+
+            now = datetime.now()
+
+            if exp.end < now:
+                if exp.status != 'FINISHED':
+                    self.logger.info(f"Exp {exp.expid} expired while offline. Marking FINISHED.")
+                    exp.status = "FINISHED"
+                    exp.save()
+                continue
+
+            if exp.expid not in running_jobs:
+                self.logger.info(f"Restoring job: {exp.expid}")
+                self.schedule_job(exp.expid)
+            else:
+                self.logger.info(f"Job {exp.expid} is already active.")
         
-        # Get the end date as a proper datetime object to prevent immediate expiration
-        end_dt = arrow.get(exp.end).datetime
+        self.logger.info("--- Resync Complete ---")
+
+    def schedule_job(self, exp_id):
+        exp = load_exp_safe(exp_id)
+        if not exp: return
+
+        start_dt = exp.start
+        end_dt = exp.end
+        now = datetime.now()
         
-        if end_dt.replace(tzinfo=None) < datetime.now():
+        # 1. Past check
+        if end_dt < now:
+            self.logger.warning(f"Cannot schedule {exp_id}: End time is in the past.")
             end_experiment(exp)
             return
 
-        exp.status = "RUNNING"
-        exp.message = "Added to the scheduler at %s" % datetime.now().isoformat()
+        # 2. Add to Scheduler (This is the "Retry" part)
+        # We add it regardless of whether it was ERROR or RUNNING before.
+        scheduler.add_job(
+            RpiModule.take_picture,
+            args=(exp_id, scheduler_status),
+            trigger='interval',
+            start_date=start_dt,
+            end_date=end_dt,
+            minutes=int(exp.interval),
+            id=exp.expid,
+            replace_existing=True
+        )
+        
+        if start_dt > now:
+            if exp.status != "SCHEDULED":
+                exp.status = "SCHEDULED"
+                exp.save()
+                self.logger.info(f"Scheduled {exp_id} (Future)")
+        else:
+            if exp.status == "NEW": 
+                exp.status = "RUNNING"
+                exp.save()
+            
+            self.logger.info(f"Rescheduled {exp_id} (Active Window). Waiting for execution to confirm status.")
 
-        # Clean string for start date
-        start = arrow.get(exp.start).format('YYYY-MM-DD HH:mm:ss').replace('+0000', '')
+        if scheduler.running:
+            scheduler_status.refresh_scheduler_status()
 
-        # Pass scheduler_status in args tuple
-        job = scheduler.add_job(RpiModule.take_picture,
-                        args=(exp_id, scheduler_status), # Added scheduler_status
-                        trigger='interval',
-                        start_date=start,
-                        end_date=end_dt,               # Use datetime object
-                        minutes=exp.interval,
-                        id=exp.expid,
-                        replace_existing=True)
-
-        self.logger.info("Exp %s scheduled for %s"%(exp.expid, job.next_run_time))
-        exp.dump()
-        scheduler_status.refresh_scheduler_status()
-
-    def sched_cancel_xp(self, expid):
-        """handle experiment cancelation
-
-        :param: expid
-        :rtype: string
-        :returns: None
-        :rtype: None
-        """
-
-        exp = Experiment(directory=os.path.join(Config.WORKING_DIR, expid))
-        self.logger.info("Canceling Exp %s" % expid )
-        exp.status = "CANCEL"
-        exp.message = "Canceled & removed from scheduler."
-        scheduler.remove_job('%s'%(expid))
-        exp.dump()
+    def cancel_job(self, expid):
+        if scheduler.get_job(expid):
+            scheduler.remove_job(expid)
+            
+        exp = load_exp_safe(expid)
+        if exp:
+            exp.status = "CANCELLED"
+            exp.message = "Cancelled by user."
+            exp.save()
+            
         scheduler_status.remove_experiment(expid)
+        self.logger.info(f"Cancelled {expid}")
+
+    def check_hardware(self, xpid):
+        """
+        Run the hardware check IMMEDIATELY (Bypassing APScheduler).
+        """
+        self.logger.info("Running Hardware Diagnostic (Immediate)...")
+        RpiModule.check_cameras(status_manager=scheduler_status)
+        exp = load_exp_safe(xpid)
+        if exp:
+            exp.status = "FINISHED"
+            exp.save()
 
 if __name__ == '__main__':
-    try:
-        ChiefOperator.mainLoop()
-    except Exception as e:
-        log.error('Exception: %s' % e)
-        raise e
+    ChiefOperator.mainLoop()

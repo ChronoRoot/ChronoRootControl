@@ -104,7 +104,7 @@ class Camera(BaseCamera):
             # 5. CRITICAL: Always release the status when done
             # This ensures the dashboard doesn't get stuck saying "LOCKED" 
             # if the user closes the tab or the stream errors out.
-            logger.info("Stream ended. Lock released.")
+            logger.info("Stream finished. Lock released.")
             status_manager.update_lock_state(status="FREE", owner=None, details=None)
             
             # Optional: Reset multiplexer status text to OK if it wasn't an error

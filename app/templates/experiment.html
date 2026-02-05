@@ -6,11 +6,24 @@
 
 {% block content %}
 
-{% set is_running = (exp.status in ['RUNNING', 'ERROR']) or (actions == 'cancelable') %}
+{# --- CHANGED: Logic definitions based on new rules --- #}
 
-{% set is_finished = exp.status in ['ENDED', 'CANCEL'] %}
+{# Rule: SETUP and New forms are the only ones that can Launch/Start #}
+{% set is_setup = (exp.status == 'SETUP') or (actions == 'new') %}
 
-{% set is_disabled = is_running or is_finished or (actions == 'readonly') %}
+{# Rule: NEW and SCHEDULED can be modified (form enabled) #}
+{% set is_modifiable = exp.status in ['NEW', 'SCHEDULED'] %}
+
+{# Rule: Running state, including Errors during run #} 
+{% set is_running = exp.status == 'RUNNING' or exp.status == 'ERROR' %}
+
+{# Rule: Finished states (Allowed to delete) #}
+{% set is_finished = exp.status in ['FINISHED', 'CANCELLED'] %}
+
+{# Logic: Form is disabled unless it is Setup, New, or Scheduled #}
+{% set is_disabled = not (is_setup or is_modifiable) %}
+
+{# ----------------------------------------------------- #}
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2">
@@ -23,6 +36,7 @@
     
     {% if exp.expid and actions != 'new' %}
     <div class="btn-toolbar mb-2 mb-md-0">
+        {# Rule: DIAGNOSTICS (and others) can view folder. This link remains active for all existing experiments. #}
         <a href="{{ url_for('storage_page.browse', subpath=exp.expid) }}" class="btn btn-sm btn-outline-primary mr-2" target="_blank">
             <i class="fas fa-folder-open"></i> Open Data
         </a>
@@ -34,10 +48,10 @@
 </div>
 
 {% if exp.status %}
-    {% if exp.status == "ENDED" %}
+    {% if exp.status == "FINISHED" %}
         <div class="alert alert-success shadow-sm">
             <h4 class="alert-heading"><i class="fas fa-check-circle"></i> Experiment Completed</h4>
-    {% elif exp.status == "CANCEL" %}
+    {% elif exp.status == "CANCELLED" %}
         <div class="alert alert-warning shadow-sm">
             <h4 class="alert-heading"><i class="fas fa-ban"></i> Experiment Cancelled</h4>
     {% elif exp.status == "ERROR" %}
@@ -51,7 +65,7 @@
             <h4 class="alert-heading">{{ exp.status }}</h4>
     {% endif %}
             <p class="mb-0">{{ exp.message }}</p>
-            {% if is_running %}
+            {% if exp.status in ['NEW', 'SCHEDULED', 'RUNNING'] %}
                 <hr>
                 <p class="mb-0"><strong>Next Image:</strong> {{ exp.next_run_time }}</p>
             {% endif %}
@@ -196,46 +210,50 @@
                     </a>
                     {% endif %}
                     
-                    {% if is_running %}
-                        {% if exp.status == 'ERROR' %}
-                             <div class="alert alert-danger small text-center">Experiment Error</div>
-                        {% else %}
-                             <div class="alert alert-info small text-center">Experiment in progress</div>
-                        {% endif %}
-                        
+                    {# --- CHANGED: Action Buttons Logic --- #}
+
+                    {# 1. SETUP: Can Launch #}
+                    {% if is_setup %}
+                        <button type="submit" name="action" value="new" class="btn btn-success btn-lg btn-block mb-3">
+                            <i class="fas fa-play-circle mr-2"></i> Start / Launch
+                        </button>
+
+                    {# 2. RUNNING: Can Stop (Cancel) only #}
+                    {% elif is_running %}
+                        <div class="alert alert-info small text-center">Experiment in progress</div>
                         <button type="submit" name="action" value="cancel" class="btn btn-warning btn-block btn-lg">
                             <i class="fas fa-stop-circle mr-2"></i> Stop
                         </button>
-                    
+
+                    {# 3. NEW & SCHEDULED: Can Modify, Save, Cancel, and Delete #}
+                    {% elif is_modifiable %}
+                        <button type="submit" name="action" value="save" class="btn btn-primary btn-block mb-3">
+                            <i class="fas fa-save mr-2"></i> Save Changes
+                        </button>
+
+                        <button type="submit" name="action" value="cancel" class="btn btn-warning btn-block mb-2">
+                            <i class="fas fa-ban mr-2"></i> Cancel
+                        </button>
+                        
+                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" onclick="return confirm('Permanently delete this experiment?')">
+                            <i class="fas fa-trash-alt mr-2"></i> Delete
+                        </button>
+
+                    {# 4. FINISHED & CANCELLED: Can Delete #}
                     {% elif is_finished %}
                         <div class="alert alert-secondary text-center mb-3">
-                            {% if exp.status == "CANCEL" %}
-                                <i class="fas fa-ban mr-1"></i> Cancelled
-                            {% else %}
-                                <i class="fas fa-check mr-1"></i> Finished
-                            {% endif %}
+                             {{ exp.status }}
                         </div>
                         <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" onclick="return confirm('Permanently delete this experiment and files?')">
                             <i class="fas fa-trash-alt mr-2"></i> Delete Experiment
                         </button>
 
-                    {% elif actions == "readonly" %}
-                        <div class="alert alert-secondary text-center">Read Only</div>
-
-                    {% elif actions == "new" %}
-                        <button type="submit" name="action" value="new" class="btn btn-success btn-lg btn-block mb-3">
-                            <i class="fas fa-play-circle mr-2"></i> Start
-                        </button>
-
-                    {% elif actions == "editable" %}
-                        <button type="submit" name="action" value="new" class="btn btn-success btn-block mb-2">
-                            <i class="fas fa-play-circle mr-2"></i> Launch
-                        </button>
-                        
-                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" onclick="return confirm('Permanently delete this experiment and all its files?')">
-                            <i class="fas fa-trash-alt mr-2"></i> Delete
-                        </button>
+                    {# 5. DIAGNOSTICS: View folder only (handled above), no buttons here #}
+                    {% elif exp.status == 'DIAGNOSTIC' %}
+                        <div class="alert alert-secondary text-center">Diagnostics (Read Only)</div>
+                    
                     {% endif %}
+
                 </div>
             </div>
         </div>
@@ -257,10 +275,22 @@
                             <th>Cameras</th>
                             <th>Details</th>
                         </tr>
-                    </thead>
+                    </thead>{# 3. NEW & SCHEDULED: Can Modify, Save, Cancel, and Delete #}
+                    {% elif is_modifiable %}
+                        <button type="submit" name="action" value="save" class="btn btn-primary btn-block mb-3">
+                            <i class="fas fa-save mr-2"></i> Save Changes
+                        </button>
+
+                        <button type="submit" name="action" value="cancel" class="btn btn-warning btn-block mb-2">
+                            <i class="fas fa-ban mr-2"></i> Cancel
+                        </button>
+                        
+                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" onclick="return confirm('Permanently delete this experiment?')">
+                            <i class="fas fa-trash-alt mr-2"></i> Delete
+                        </button>
                     <tbody>
                         {% for logentry in exp.logs %}
-                        <tr class="{% if logentry.status == 'ENDED' %}table-success{% elif logentry.status == 'ERROR' %}table-danger{% elif logentry.status == 'CANCEL' %}table-warning{% endif %}">
+                        <tr class="{% if logentry.status == 'FINISHED' %}table-success{% elif logentry.status == 'ERROR' %}table-danger{% elif logentry.status == 'CANCELLED' %}table-warning{% endif %}">
                             <td>{{ logentry.id }}</td>
                             <td><strong>{{ logentry.status }}</strong></td>
                             <td>{{ logentry.date }}</td>
@@ -289,16 +319,21 @@
 
 {% block footer %}
 <script type="text/javascript">
-    // 1. CLOCK SCRIPT
+    let remoteTime = new Date("{{ now }}").getTime(); 
+
     function updateServerClock() {
-        const now = new Date();
+        remoteTime += 1000;
+        
+        const displayDate = new Date(remoteTime);
         const timeOptions = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
-        document.getElementById('server-clock').innerText = now.toLocaleDateString() + " " + now.toLocaleTimeString([], timeOptions);
+        
+        document.getElementById('server-clock').innerText = 
+            displayDate.toLocaleDateString() + " " + displayDate.toLocaleTimeString([], timeOptions);
     }
+
     setInterval(updateServerClock, 1000);
     updateServerClock();
 
-    // 2. DATEPICKER SCRIPT
     {% if not is_disabled %}
     $(function () {
         $.fn.datetimepicker.Constructor.Default = $.extend({}, $.fn.datetimepicker.Constructor.Default, {

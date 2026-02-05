@@ -21,10 +21,8 @@ def experiment_status():
     """
     Return a summary of all the experiment of the module
     """
-    exps = ExperimentList(directory=Config.WORKING_DIR)
-    devicetime = '{0:%Y-%m-%d %H:%M:%S}'.format(datetime.now())
+    exps = ExperimentList()
     try:
-        return render_template('index.html', exps=exps, now=devicetime,
-                                config=Config)
+        return render_template('index.html', exps=exps, now=datetime.now(), config=Config)
     except TemplateNotFound:
         abort(404)

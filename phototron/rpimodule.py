@@ -16,7 +16,8 @@ RpiModule class impements all ChronoRoot robot functions
 import logging
 import os
 import shutil
-import time, arrow
+import time
+from datetime import datetime
 from config import Config
 from phototron.camera_selector import SelectorFactory
 from phototron.light import Light
@@ -87,7 +88,9 @@ class RpiModule(object):
         rpi = RpiModule()
         rpi.logger.info(f'taking picture for task : {xpid}')
         light = rpi.light
-        exp = Experiment(directory=os.path.join(Config.WORKING_DIR, xpid))
+        
+        # Updated to use the factory method from previous step
+        exp = Experiment.load_from_id(xpid)
 
         cameras = exp.cameras
         params = exp.img_params
@@ -96,10 +99,10 @@ class RpiModule(object):
         if not rpi.selector.self_check():
             rpi.logger.error('Multiplexer fatal error during self-check')
             report(state="MULTIPLEXER_ERROR")
-            exp.status = "FAILED"
+            exp.status = "ERROR"
             exp.message = "Multiplexer fatal error"
-            exp.dump()
-            return False
+            exp.save() # Updated from dump() to save() to match Model methods
+            raise e
         
         report(state="OK")
 
@@ -137,31 +140,35 @@ class RpiModule(object):
                                 if camera not in Config.CAMS:
                                     continue 
                                 
+                                # FREEZE TIME: Use this single object for logs AND filenames
+                                now_obj = datetime.now()
+                                timestamp_log = now_obj.strftime(Config.PRETTY_FORMAT)
+                                timestamp_file = now_obj.strftime(Config.DATE_FORMAT)
+
                                 report(cam_id=camera, cam_status={
                                     "health": "CAPTURING", 
-                                    "last_check": arrow.now().format('HH:mm:ss')
+                                    "last_check": timestamp_log
                                 })
                                 
-                                instant_date = arrow.now().format('YYYY-MM-DD_HH-mm-ss')
                                 camdir = os.path.join(exp.workdir, str(camera))
                                 os.makedirs(camdir, exist_ok=True)
-                                imagepath = os.path.join(camdir, f'{instant_date}_{camera}.png')
+                                imagepath = os.path.join(camdir, f'{timestamp_file}_{camera}.png')
 
                                 success = rpi.selector.capture(camera, imagepath, params)
 
                                 if success:
-                                    step_images.append((instant_date, camera, imagepath))
-                                    rel_path = f"{xpid}/{camera}/{instant_date}_{camera}.png"
+                                    step_images.append((timestamp_file, camera, imagepath))
+                                    rel_path = f"{xpid}/{camera}/{timestamp_file}_{camera}.png"
                                     report(cam_id=camera, last_pic=True, cam_status={
                                         "health": "OK",
-                                        "last_check": arrow.now().format('HH:mm:ss'),
+                                        "last_check": timestamp_log,
                                         "path": rel_path
                                     })
                                 else:
                                     rpi.logger.error(f"Camera {camera} failed.")
                                     report(cam_id=camera, cam_status={
                                         "health": "FAILED",
-                                        "last_check": arrow.now().format('HH:mm:ss'),
+                                        "last_check": timestamp_log,
                                         "path": None
                                     })
                                     light.state = Light.OFF 
@@ -171,18 +178,19 @@ class RpiModule(object):
                             rpi.logger.error(f"Critical error on Cam {camera}: {e}")
                             report(cam_id=camera, cam_status={
                                 "health": "HW_ERROR",
-                                "last_check": arrow.now().format('HH:mm:ss'),
+                                "last_check": datetime.now().strftime(Config.PRETTY_FORMAT),
                                 "path": None
                             })
                             report(state="MULTIPLEXER_ERROR")
                             light.state = Light.OFF 
-                            return False
+                            raise e
 
                         # --- C. Success Path ---
                         light.state = Light.OFF
                         
                         if len(step_images) > 0:
-                            exp.new_step(tuple(step_images))
+                            if hasattr(exp, 'new_step'):
+                                exp.new_step(tuple(step_images))
                             exp.message = "OK"
                             rpi.logger.info("Sequence completed successfully.")
                             return True
@@ -226,7 +234,11 @@ class RpiModule(object):
         system_dir = os.path.join(Config.WORKING_DIR, "system")
         if os.path.exists(system_dir):
             try:
-                shutil.rmtree(system_dir)
+                # remove only the directories inside
+                for item in os.listdir(system_dir):
+                    item_path = os.path.join(system_dir, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
             except Exception:
                 pass
         os.makedirs(system_dir, exist_ok=True)
@@ -245,24 +257,33 @@ class RpiModule(object):
                         )
 
                     for cam_id in Config.CAMS:
+                        now_obj = datetime.now()
+                        timestamp_log = now_obj.strftime(Config.PRETTY_FORMAT)
+                        
                         report(cam_id=cam_id, cam_status={
                             "health": "TESTING", 
-                            "last_check": arrow.now().format('HH:mm:ss')
+                            "last_check": timestamp_log
                         })
                         
                         try:
                             is_online = rpi.selector.probe(cam_id)
-                            cam_data = {"health": "NOT DETECTED", "last_check": arrow.now().format('HH:mm:ss'), "path": None}
+                            cam_data = {
+                                "health": "NOT DETECTED", 
+                                "last_check": timestamp_log, 
+                                "path": None
+                            }
                             
                             if is_online:
                                 time.sleep(2.0)
-                                instant_date = arrow.now().format('YYYY-MM-DD_HH-mm-ss')
+                                capture_time = datetime.now()
+                                timestamp_file = capture_time.strftime(Config.DATE_FORMAT)
+                                
                                 camdir = os.path.join(system_dir, str(cam_id))
                                 os.makedirs(camdir, exist_ok=True)
-                                imagepath = os.path.join(camdir, f'{instant_date}_camera_{cam_id}.png')
+                                imagepath = os.path.join(camdir, f'{timestamp_file}_camera_{cam_id}.png')
                                 
                                 rpi.selector.capture(cam_id, imagepath, Config.CAM_PARAMS)
-                                rel_path = f"system/{cam_id}/{instant_date}_camera_{cam_id}.png"
+                                rel_path = f"system/{cam_id}/{timestamp_file}_camera_{cam_id}.png"
                                 
                                 cam_data["health"] = "OK"
                                 cam_data["path"] = rel_path
@@ -273,7 +294,11 @@ class RpiModule(object):
                             
                         except Exception as probe_err:
                             rpi.logger.error(f"Probe crashed on Cam {cam_id}: {probe_err}")
-                            error_data = {"health": "ERROR", "last_check": arrow.now().format('HH:mm:ss'), "path": None}
+                            error_data = {
+                                "health": "ERROR", 
+                                "last_check": datetime.now().strftime(Config.PRETTY_FORMAT), 
+                                "path": None
+                            }
                             report(cam_id=cam_id, cam_status=error_data)
                             results[cam_id] = error_data
                             report(state="CAMERA_ERROR")

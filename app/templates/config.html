@@ -241,7 +241,7 @@
             } 
         });
 
-        $('#datetimepicker1').datetimepicker({format: 'YYYY-MM-DD HH:mm:ss ZZ'});
+        $('#datetimepicker1').datetimepicker({format: 'YYYY-MM-DD HH:mm:ss'});
     });
 
     function runDiagnostic() {
@@ -254,8 +254,7 @@
         })
         .then(response => {
             if (response.ok) {
-                // Wait 1 second before reloading so the user sees the button reaction
-                setTimeout(() => window.location.reload(), 1000);
+                setTimeout(() => window.location.reload(), 2000);
             } else {
                 alert("Error starting diagnostic scan");
                 $('.btn-warning').prop('disabled', false).removeClass('disabled');

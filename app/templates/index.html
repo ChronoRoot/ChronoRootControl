@@ -1,71 +1,211 @@
 {% extends "base.html" %}
+
 {% block title %}
-    {{ config.SITE_NAME }}
+    {{ config.SITE_NAME }} - Dashboard
 {% endblock %}
+
 {% block header %}
+    <link href="{{ url_for('static', filename='css/vis-timeline-graph2d.min.css') }}" rel="stylesheet" type="text/css" />
+    
+    <style>
+        /* Base styling for timeline items */
+        .vis-item { 
+            border-color: transparent; 
+            font-size: 10pt; 
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+        }
+        /* Specific style for the 'NOW' marker */
+        .vis-item.status-NOW { 
+            background-color: #ffc107 !important; 
+            color: black !important; 
+            opacity: 0.6;
+            z-index: 0; 
+        }
+        /* Custom label styling */
+        .vis-label { font-weight: bold; color: #555; }
+
+        /* Server time marker (Red Line) */
+        .vis-item.server-time-line {
+            background-color: transparent !important;
+            border-left: 2px solid #FF0000;
+            width: 0 !important;
+            z-index: 9999;
+            pointer-events: none;
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
-      <h1 class="mt-5">{{ config.SITE_NAME }}</h1>
-      <p class="lead">{{ config.SITE_DESC }} </p>
-      <h2 class="sub-header">Experiments</h2>
+    <h1 class="mt-5">{{ config.SITE_NAME }}</h1>
+    <p class="lead text-muted">{{ config.SITE_DESC }}</p>
 
-      <a href="{{url_for('api_exp.get_experiment_list') }}">As json <i class="fas fa-cog"></i></a>
-      <div class="table-responsive">
-          <table class="table tablesorter table-hover" id="experiment_list">
-              <thead>
-                  <tr>
-                      <th>Experiment id</th>
-                      <th>Status</th>
-                      <th>Start date</th>
-                      <th>Stop date</th>
-                      <th>Interval</th>
-                      <th>Next image</th>
-                      <th></th>
-                  </tr>
-              </thead>
-              <tbody>
-                  {% for exp in exps.exps %}
-                  {% if exp.status == "ENDED" %}
-                  <tr class="table-success clickable-row" data-href="{{url_for('experiment_page.setuped_experiment', expid=exp.expid) }}">
-                  {% elif exp.status == "CANCEL" %}
-                  <tr class="table-warning clickable-row" data-href="{{url_for('experiment_page.setuped_experiment', expid=exp.expid) }}">
-                  {% elif exp.status == "ERROR" %}
-                  <tr class="table-danger clickable-row" data-href="{{url_for('experiment_page.setuped_experiment', expid=exp.expid) }}">
-                  {% elif exp.status == "RUNNING" %}
-                  <tr class="clickable-row" data-href="{{url_for('experiment_page.setuped_experiment', expid=exp.expid) }}">
-                  {% else %}
-                  <tr class="table-info clickable-row" data-href="{{url_for('experiment_page.setuped_experiment', expid=exp.expid) }}">
-                  {% endif %}
-                      <th scope="row">{{exp.expid}}</th>
-                      <td>{{exp.status}}</td>
-                      <td>{{exp.start.format('YYYY/MM/DD HH:mm')}}</td>
-                      <td>{{exp.end.format('YYYY/MM/DD HH:mm')}}</td>
-                      <td>{{exp.interval}} min</td>
-                      <td>{{exp.next_run_time}}</td>
-                      <td>
-                          <a href="{{url_for('api_exp.get_experiment', expid=exp.expid) }}">As json <i class="fas fa-cog"></i>
-                          </a>
-                      </td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-          </table>
+    <h2 class="sub-header mt-4"><i class="fas fa-stream text-secondary mr-2"></i>Schedule</h2>
+    
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            {# The Visualization Container #}
+            <div id="visualization" style="height: 350px; width: 100%;"></div>
+            
+            <div class="text-right mt-2 small text-muted">
+                <i class="fas fa-info-circle"></i> Timeline uses Server Time: <strong>{{ now }}</strong>
+            </div>
         </div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="sub-header mb-0">Experiments List</h2>
         <div>
-            <a role="button" class="btn btn-primary" aria-label="New experiment" href="{{url_for('experiment_page.new_experiment')}}">New experiment <i class="fas fa-plus-circle"></i></a>
+            <a role="button" class="btn btn-success shadow-sm" aria-label="New experiment" href="{{url_for('experiment_page.new_experiment')}}">
+                <i class="fas fa-plus-circle mr-2"></i>New Experiment
+            </a>
+            <a href="{{url_for('api_exp.get_experiment_list') }}" class="btn btn-outline-secondary btn-sm ml-2" title="Export List JSON">
+                <i class="fas fa-code"></i>
+            </a>
         </div>
+    </div>
+
+    <div class="table-responsive card shadow-sm">
+        <table class="table tablesorter table-hover mb-0" id="experiment_list">
+            <thead class="thead-light">
+                <tr>
+                    <th>Experiment ID</th>
+                    <th>Status</th>
+                    <th>Start Date</th>
+                    <th>End Date</th>
+                    <th>Interval</th>
+                    <th>Next Image</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for exp in exps.exps %}
+                
+                {# Row Coloring logic #}
+                {% if exp.status == "FINISHED" %}
+                    {% set row_class = "table-success" %}
+                {% elif exp.status == "CANCELLED" %}
+                    {% set row_class = "table-warning" %}
+                {% elif exp.status == "ERROR" %}
+                    {% set row_class = "table-danger" %}
+                {% elif exp.status == "RUNNING" %}
+                    {% set row_class = "" %}
+                {% else %}
+                    {% set row_class = "table-info" %}
+                {% endif %}
+
+                <tr class="{{ row_class }} clickable-row" style="cursor: pointer;" data-href="{{url_for('experiment_page.setuped_experiment', expid=exp.expid) }}">
+                    <th scope="row" class="align-middle">
+                        {% if exp.status == "RUNNING" %}
+                            <i class="fas fa-circle text-success small mr-1"></i>
+                        {% endif %}
+                        {{exp.expid}}
+                    </th>
+                    <td class="align-middle">
+                        {% if exp.status == 'FINISHED' %}Finished
+                        {% elif exp.status == 'CANCELLED' %}Cancelled
+                        {% else %}{{exp.status}}
+                        {% endif %}
+                    </td>
+                    
+                    {# Use strftime for clean table formatting #}
+                    <td class="align-middle">{{exp.start.strftime('%Y/%m/%d %H:%M')}}</td>
+                    <td class="align-middle">{{exp.end.strftime('%Y/%m/%d %H:%M')}}</td>
+                    
+                    <td class="align-middle">{{exp.interval}} min</td>
+                    <td class="align-middle small">{{exp.next_run_time}}</td>
+                    <td class="text-right align-middle">
+                        <object>
+                            <a href="{{url_for('api_exp.get_experiment', expid=exp.expid) }}" class="btn btn-sm btn-light border" title="View JSON">
+                                <i class="fas fa-code text-muted"></i>
+                            </a>
+                        </object>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
 {% endblock %}
+
 {% block footer %}
     <script>
-$(function(){
-    $("#experiment_list").tablesorter({ sortList: [[2,0]] });
-});
+        $(function(){ $("#experiment_list").tablesorter({ sortList: [[2,1]] }); });
+        jQuery(document).ready(function($) {
+            $(".clickable-row").click(function() { window.document.location = $(this).data("href"); });
+        });
+    </script>
 
-jQuery(document).ready(function($) {
-    $(".clickable-row").click(function() {
-        window.document.location = $(this).data("href");
-    });
-});
+    <script src="{{ url_for('static', filename='js/vis-timeline-graph2d.min.js') }}"></script>
+
+    <script type="text/javascript">
+        
+        // --- A. Define Colors ---
+        {% set palette = ['#3366CC', '#DC3912', '#FF9900', '#109618', '#990099', '#3B3EAC', '#0099C6', '#DD4477', '#66AA00', '#B82E2E'] %}
+
+        // Create a DataSet (allows two way data-binding)
+        var items = new vis.DataSet([
+            {% for exp in exps.exps %}
+                {% if exp.status != 'ERROR' %} 
+                {
+                    id: '{{ exp.expid }}',
+                    content: '{{ exp.expid }}',
+                    // Use Jinja to format date as ISO string directly
+                    start: '{{ exp.start.strftime("%Y-%m-%dT%H:%M:%S") }}',
+                    end:   '{{ exp.end.strftime("%Y-%m-%dT%H:%M:%S") }}',
+                    group: '{{ exp.status }}',
+                    style: 'background-color: {{ palette[loop.index0 % 10] }}; color: white;'
+                },
+                {% endif %}
+            {% endfor %}
+        ]);
+
+        // --- B. Add "SERVER TIME" Marker ---
+        // We add this as a background item or point item
+        // Ensure server_now is ISO formatted from Python or standard string
+        var serverNowStr = "{{ now }}".replace(' ', 'T'); 
+        
+        items.add({
+            id: 'server_now',
+            content: '',
+            start: serverNowStr,
+            type: 'point', 
+            className: 'server-time-line'
+        });
+
+        // --- C. Define Groups (Must match exp.status exactly!) ---
+        var groups = new vis.DataSet([
+            {id: 'DIAGNOSTICS',  content: 'Diagnostics'}, 
+            {id: 'NEW',         content: 'New / Draft'},
+            {id: 'RUNNING',     content: 'Running'},
+            {id: 'SCHEDULED',   content: 'Scheduled'},
+            {id: 'FINISHED',    content: 'Finished'},
+            {id: 'CANCELLED',   content: 'Cancelled'}, 
+        ]);
+
+        // --- D. Configuration ---
+        var container = document.getElementById('visualization');
+        
+        var options = {
+            groupOrder: function (a, b) {
+                var order = ['DIAGNOSTIC', 'NEW', 'RUNNING', 'SCHEDULED', 'FINISHED', 'CANCELLED'];
+                return order.indexOf(a.id) - order.indexOf(b.id);
+            },
+            editable: false,
+            stack: true,
+            margin: { item: 5, axis: 5 },
+            orientation: 'top',
+            showCurrentTime: false, // We use our own custom red line
+            zoomMin: 1000 * 60 * 60, // 1 hour
+            zoomMax: 1000 * 60 * 60 * 24 * 31 * 3 // 3 months
+        };
+
+        // --- E. Render ---
+        // Only render if we have data or at least the server time
+        var timeline = new vis.Timeline(container, items, groups, options);
+        
+        // Focus on server time initially
+        timeline.moveTo(serverNowStr);
+
     </script>
 {% endblock %}

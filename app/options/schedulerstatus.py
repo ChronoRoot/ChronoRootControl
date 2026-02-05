@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 import logging
 import json 
+from config import Config
 
 class SchedulerStatus(object):
     # Shared configuration
@@ -21,7 +22,7 @@ class SchedulerStatus(object):
         "scheduler": {
             "running": False,
             "last_update": None,
-            "uptime_start": datetime.now().isoformat() # Moved boot time here
+            "uptime_start": ""
         },
         "jobs": {},  # Stores all experiment job info
         "hardware": {
@@ -44,9 +45,15 @@ class SchedulerStatus(object):
     def __init__(self, scheduler=None, log=None):
         self.scheduler = scheduler
         self.log = log
-        # Deep copy default state to instance to avoid shared references
+        
+        # Deep copy default state
         self.state = json.loads(json.dumps(self.default_state))
         
+        try:
+            self.state["scheduler"]["uptime_start"] = datetime.now().strftime(Config.PRETTY_FORMAT)
+        except Exception:
+            self.state["scheduler"]["uptime_start"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
         # Try to load existing state from disk
         self.load()
 
@@ -100,7 +107,7 @@ class SchedulerStatus(object):
                 self.state["hardware"]["cams"][cid].update(cam_status)
 
         if last_pic:
-            self.state["hardware"]["last_picture"] = datetime.now().isoformat()
+            self.state["hardware"]["last_picture"] = datetime.now().strftime(Config.PRETTY_FORMAT)
         
         self.write()
 
@@ -121,13 +128,13 @@ class SchedulerStatus(object):
         if self.scheduler:
             # 1. Update Running State
             self.state["scheduler"]["running"] = self.scheduler.running
-            self.state["scheduler"]["last_update"] = datetime.now().isoformat()
+            self.state["scheduler"]["last_update"] = datetime.now().strftime(Config.PRETTY_FORMAT)
 
             # 2. Update Jobs
             current_jobs = {}
             for job in self.scheduler.get_jobs():
                 current_jobs[job.id] = {
-                    'next_run_time': str(job.next_run_time) if job.next_run_time else None,
+                    'next_run_time': job.next_run_time.strftime(Config.PRETTY_FORMAT) if job.next_run_time else None,
                     'trigger': str(job.trigger),
                     'status': 'RUNNING' if job.next_run_time else 'IDLE'
                 }
@@ -165,7 +172,7 @@ class SchedulerStatus(object):
         # Calculate Uptime
         uptime_str = "Unknown"
         try:
-            boot_dt = datetime.fromisoformat(data["scheduler"]["uptime_start"])
+            boot_dt = datetime.strptime(data["scheduler"]["uptime_start"], Config.PRETTY_FORMAT)
             delta = datetime.now() - boot_dt
             # formatting helper
             m, s = divmod(int(delta.total_seconds()), 60)
@@ -178,10 +185,7 @@ class SchedulerStatus(object):
         last_pic_str = "Never"
         raw_lp = data["hardware"]["last_picture"]
         if raw_lp:
-            try:
-                last_pic_str = datetime.fromisoformat(raw_lp).strftime('%Y-%m-%d %H:%M:%S')
-            except:
-                last_pic_str = str(raw_lp)
+            last_pic_str = str(raw_lp)
 
         return {
             "status": "running" if data["scheduler"]["running"] else "stopped",
