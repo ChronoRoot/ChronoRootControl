@@ -25,7 +25,7 @@ def logit(myfile, msg):
     """
     Appends the current time to a message for logging
     """
-    current_time = datetime.datetime.now()
+    current_time = '{0:%Y-%m-%d %H:%M:%S}'.format(datetime.datetime.now())
     with open(myfile, "a") as logf:
         logf.writelines("AUTOMODE - %s - %s \n" % (current_time, msg))
 
