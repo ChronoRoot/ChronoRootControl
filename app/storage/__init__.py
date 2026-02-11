@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import json
 import time
-from flask import Blueprint, render_template, send_from_directory, abort, request, flash, redirect, url_for
+from flask import Blueprint, render_template, send_from_directory, abort, request, flash, url_for
 from config import Config
 
 storage_page = Blueprint('storage_page', __name__,
@@ -189,7 +189,8 @@ def set_path():
     
     if not new_path:
         flash("No path selected.", "danger")
-        return redirect(url_for('storage_page.index'))
+        target_url = url_for('storage_page.index')
+        return f"<script>window.location.href = '{target_url}';</script>"
 
     # 1. Locate where user_config.py should be
     # It must be in the same folder as config.py
@@ -199,7 +200,8 @@ def set_path():
     # 2. Check Permissions (if file exists)
     if os.path.exists(user_config_file) and not os.access(user_config_file, os.W_OK):
         flash(f"Permission Error: Cannot write to {user_config_file}. Check file ownership.", "danger")
-        return redirect(url_for('storage_page.index'))
+        target_url = url_for('storage_page.index')
+        return f"<script>window.location.href = '{target_url}';</script>"
 
     try:
         # 3. Read existing file or start empty
@@ -281,7 +283,8 @@ def mount_drive():
     
     if not device_uuid:
         flash("Error: Drive has no UUID. Cannot mount persistently.", "danger")
-        return redirect(url_for('storage_page.index'))
+        target_url = url_for('storage_page.index')
+        return f"<script>window.location.href = '{target_url}';</script>"
 
     try:
         # Step 1: Create Mount Point
@@ -336,7 +339,8 @@ def mount_drive():
     except Exception as e:
         flash(f"Error: {e}", "danger")
         
-    return redirect(url_for('storage_page.index'))
+    target_url = url_for('storage_page.index')
+    return f"<script>window.location.href = '{target_url}';</script>"
 
 @storage_page.route('/browse/<path:subpath>')
 def browse(subpath):

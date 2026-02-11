@@ -15,7 +15,7 @@ from phototron.rpimodule import RpiModule
 from app.options.schedulerstatus import SchedulerStatus
 
 
-from flask import (Blueprint, abort, flash, redirect, render_template, request,
+from flask import (Blueprint, abort, flash, render_template, request,
                    url_for, Response)
 
 config_page = Blueprint('config_page', __name__,
@@ -47,8 +47,8 @@ def conf():
         else:
             flash('Error: Date change failed. System said: %s' % retval, 'danger')
             
-        # FORCE REFRESH: Redirect back to the GET view of this same page
-        return redirect(url_for('config_page.conf'))
+        target_url = url_for('config_page.conf')
+        return f"<script>window.location.href = '{target_url}';</script>"
 
     # --- 2. Backlight Logic ---
     if backlight_form.validate_on_submit() and backlight_form.data:
@@ -57,8 +57,8 @@ def conf():
         else:
             light.state = light.OFF
             
-        # FORCE REFRESH: Redirect here as well
-        return redirect(url_for('config_page.conf'))
+        target_url = url_for('config_page.conf')
+        return f"<script>window.location.href = '{target_url}';</script>"
 
     return render_template('config.html', date=now,
             app_setting_form=app_setting_form,

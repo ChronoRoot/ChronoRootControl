@@ -4,7 +4,7 @@ Live preview from camera
 from ..options.form import BackLightForm
 import os
 from config import Config
-from flask import (Blueprint, abort, flash, redirect, render_template, request,
+from flask import (Blueprint, abort, flash, render_template, request,
                    url_for, Response)
 from .camera_pi import Camera
 
@@ -51,7 +51,8 @@ def index(cam_id):
         else:
             light.state = light.OFF
         
-        return redirect(url_for('focus_page.index', cam_id=cam_id))
+        target_url = url_for('focus_page.index', cam_id=cam_id)
+        return f"<script>window.location.href = '{target_url}';</script>"
 
     return render_template('focus.html', 
             cam_id=cam_id,

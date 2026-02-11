@@ -7,7 +7,7 @@ from app.experiment.form import SettingsForm
 from app.experiment.models import Experiment
 from .models import Experiment
 from config import Config
-from flask import (Blueprint, abort, flash, redirect, render_template, request,
+from flask import (Blueprint, abort, flash, render_template, request,
                    url_for)
 from wtforms import SelectMultipleField, TextAreaField
 from datetime import datetime
@@ -42,7 +42,8 @@ def new_experiment():
             exp.create() 
             
             flash('Launched! ID: %s' % exp.expid, 'success')
-            return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+            target_url = url_for('experiment_page.setuped_experiment', expid=exp.expid)
+            return f"<script>window.location.href = '{target_url}';</script>"
         else:
              flash('Scheduling conflict.', 'danger')
 
@@ -79,7 +80,8 @@ def setuped_experiment(expid):
                 exp.create() # Saves changes to JSON
                 flash('Changes saved successfully.', 'success')
                 # Reload to show new values
-                return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+                target_url = url_for('experiment_page.setuped_experiment', expid=exp.expid)
+                return f"<script>window.location.href = '{target_url}';</script>"
             else:
                 flash('Error saving changes. Check the form.', 'danger')
 
@@ -87,13 +89,14 @@ def setuped_experiment(expid):
         elif action == "cancel" and actions in ["editable", "cancelable"]:
             exp.cancel()
             flash('The experiment %s has been canceled' % exp.expid, 'warning')
-            return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+            target_url = url_for('experiment_page.setuped_experiment', expid=exp.expid)
+            return f"<script>window.location.href = '{target_url}';</script>"
 
         # 4. Handle DELETE
         elif action == "delete":
             exp.delete()
             flash('The experiment %s has been deleted' % exp.expid, 'danger')
-            return redirect(url_for('experiment_page.new_experiment')) # Redirect to home/new after delete
+            return "<script>window.location.href = '/';</script>"
 
     return render_template('experiment.html', form=form, exp=exp, config=Config,
                            actions=actions, now=datetime.now().strftime(Config.PRETTY_FORMAT))
