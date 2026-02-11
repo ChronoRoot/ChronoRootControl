@@ -188,7 +188,7 @@ class SchedulerStatus(object):
             last_pic_str = str(raw_lp)
 
         return {
-            "status": "running" if data["scheduler"]["running"] else "stopped",
+            "status": "running" if data["scheduler"]["running"] else "waiting",
             "uptime": uptime_str,
             "last_picture": last_pic_str,
             "multiplexer": data["hardware"]["multiplexer"],

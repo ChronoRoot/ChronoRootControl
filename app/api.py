@@ -115,14 +115,15 @@ def update_experiment(expid):
 
 @api_exp.route('/<expid>/cancel', methods=['GET', 'POST']) 
 def cancel_experiment(expid):
-    """
-    Cancel an experiment. Accepts GET or POST.
-    """
+    print(f"DEBUG: Cancel requested for {expid}") # <--- Add this
     try:
         exp = Experiment.load_from_id(expid)
+        print(f"DEBUG: Current status before cancel: {exp.status}")
     except FileNotFoundError:
         abort(404)
+    
     exp.cancel()
+    print(f"DEBUG: Status after cancel(): {exp.status}")
     return jsonify(exp.to_dict())
 
 

@@ -216,7 +216,7 @@ class RpiModule(object):
     @staticmethod
     def check_cameras(status_manager=None):
         """
-        Scans all configured camera ports.
+        Scans all configured camera ports with Backlights ON.
         """
         def report(state=None, cam_id=None, cam_status=None, last_pic=False):
             if status_manager:
@@ -228,13 +228,13 @@ class RpiModule(object):
                 )
                 
         rpi = RpiModule()
+        light = rpi.light # Reference to the Light object
         results = {}
-        rpi.logger.info("Starting hardware diagnostic scan...")
+        rpi.logger.info("Starting hardware diagnostic scan with backlights...")
         
         system_dir = os.path.join(Config.WORKING_DIR, "system")
         if os.path.exists(system_dir):
             try:
-                # remove only the directories inside
                 for item in os.listdir(system_dir):
                     item_path = os.path.join(system_dir, item)
                     if os.path.isdir(item_path):
@@ -248,13 +248,18 @@ class RpiModule(object):
                 report(state="SCANNING")
         
                 try:
-                    # Notify Status Manager: WE HAVE THE LOCK
+                    # Notify Status Manager
                     if status_manager:
                         status_manager.update_lock_state(
                             status="LOCKED", 
                             owner="System", 
                             details="Diagnostics"
                         )
+
+                    # --- START LIGHTING ---
+                    rpi.logger.info("Diagnostics: Powering ON backlights")
+                    light.state = Light.ON
+                    # ----------------------
 
                     for cam_id in Config.CAMS:
                         now_obj = datetime.now()
@@ -274,7 +279,8 @@ class RpiModule(object):
                             }
                             
                             if is_online:
-                                time.sleep(2.0)
+                                # Small delay to let the light stabilize and multiplexer switch
+                                time.sleep(1.0) 
                                 capture_time = datetime.now()
                                 timestamp_file = capture_time.strftime(Config.DATE_FORMAT)
                                 
@@ -282,7 +288,11 @@ class RpiModule(object):
                                 os.makedirs(camdir, exist_ok=True)
                                 imagepath = os.path.join(camdir, f'{timestamp_file}_camera_{cam_id}.png')
                                 
-                                rpi.selector.capture(cam_id, imagepath, Config.CAM_PARAMS)
+                                # Use backlight exposure mode if defined in your config
+                                diag_params = Config.CAM_PARAMS.copy()
+                                diag_params["exposure_mode"] = "backlight"
+
+                                rpi.selector.capture(cam_id, imagepath, diag_params)
                                 rel_path = f"system/{cam_id}/{timestamp_file}_camera_{cam_id}.png"
                                 
                                 cam_data["health"] = "OK"
@@ -294,11 +304,9 @@ class RpiModule(object):
                             
                         except Exception as probe_err:
                             rpi.logger.error(f"Probe crashed on Cam {cam_id}: {probe_err}")
-                            error_data = {
-                                "health": "ERROR", 
-                                "last_check": datetime.now().strftime(Config.PRETTY_FORMAT), 
-                                "path": None
-                            }
+                            # Ensure light goes off even on mid-loop crash
+                            light.state = Light.OFF
+                            error_data = {"health": "ERROR", "last_check": timestamp_log, "path": None}
                             report(cam_id=cam_id, cam_status=error_data)
                             results[cam_id] = error_data
                             report(state="CAMERA_ERROR")
@@ -307,7 +315,10 @@ class RpiModule(object):
                     report(state="OK")
                 
                 finally:
-                    # Release status lock
+                    # --- END LIGHTING ---
+                    rpi.logger.info("Diagnostics: Powering OFF backlights")
+                    light.state = Light.OFF 
+                    
                     if status_manager:
                         status_manager.update_lock_state(status="FREE", owner=None, details=None)
 
@@ -316,6 +327,7 @@ class RpiModule(object):
             return {"error": "LOCKED"}
         except Exception as e:
             rpi.logger.error(f"Scan failed: {e}")
+            light.state = Light.OFF # Safety shutdown
             report(state="MULTIPLEXER_ERROR")
             return {"error": str(e)}
         

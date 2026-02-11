@@ -186,11 +186,14 @@ class Experiment(object):
         message = {'id': self.expid, 'action': 'CREATE'}
         uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
 
-    def cancel(self):
+    def cancel(self):        
         message = {'id': self.expid, 'action': 'CANCEL'}
         uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
+        
         self.status = "CANCELLED"
-        self.save() # Save the new status to disk
+        self.message = "Stop requested by user."
+        self.save()
+        self.status_update() 
 
     def delete(self):
         # To delete an experiment, it should be CANCELED or FINISHED
@@ -209,7 +212,7 @@ class Experiment(object):
         # 1. Set Time Window (Now -> Now + 10min)
         now = datetime.now()
         self.start = now
-        self.end = now + timedelta(minutes=10)
+        self.end = now + timedelta(minutes=8)
 
         # 2. Ensure ID (System or temp)
         if not self.expid: 

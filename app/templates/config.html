@@ -75,6 +75,30 @@
 
         <div class="card mb-4 shadow-sm">
             <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="far fa-clock mr-2"></i>Date & Time</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Current system date: <strong>{{ date }}</strong></p>
+                <form action="" method="post" name="login" class="form-inline">
+                    {{ app_setting_form.hidden_tag() }}
+                    <div class="input-group date mr-2 mb-2" id="datetimepicker1" data-target-input="nearest" style="flex-grow: 1;">
+                        {{ app_setting_form.systemDate(class="form-control") }}
+                        <div class="input-group-append" data-target="#datetimepicker1" data-toggle="datetimepicker">
+                            <div class="input-group-text"><i class="far fa-calendar"></i></div>
+                        </div>
+                    </div>
+                    <button type="submit" name="action" value="set" class="btn btn-info mb-2">Set</button>
+                </form>
+                {% for error in app_setting_form.systemDate.errors %}
+                <div class="alert alert-danger mt-2">
+                    {{ error }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="card mb-4 shadow-sm">
+            <div class="card-header bg-light">
                 <h5 class="mb-0"><i class="fas fa-server mr-2"></i>System Status</h5>
             </div>
             <div class="card-body">
@@ -180,26 +204,39 @@
         </script>
 
         <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light">
-                <h5 class="mb-0"><i class="far fa-clock mr-2"></i>Date & Time</h5>
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-lightbulb mr-2"></i>Backlight</h5>
+                {% if light_state %}
+                    <span class="badge badge-warning">ON <i class="fas fa-sun"></i></span>
+                {% else %}
+                    <span class="badge badge-secondary">OFF <i class="fas fa-moon"></i></span>
+                {% endif %}
             </div>
             <div class="card-body">
-                <p class="text-muted">Current system date: <strong>{{ date }}</strong></p>
-                <form action="" method="post" name="login" class="form-inline">
-                    {{ app_setting_form.hidden_tag() }}
-                    <div class="input-group date mr-2 mb-2" id="datetimepicker1" data-target-input="nearest" style="flex-grow: 1;">
-                        {{ app_setting_form.systemDate(class="form-control") }}
-                        <div class="input-group-append" data-target="#datetimepicker1" data-toggle="datetimepicker">
-                            <div class="input-group-text"><i class="far fa-calendar"></i></div>
+                <p class="card-text text-muted small">Toggle the IR illumination for all camera ports.</p>
+                
+                <form action="" method="post" name="backlight">
+                    {{ backlight_form.hidden_tag() }}
+                    
+                    <div class="form-group">
+                        <div class="custom-control custom-switch custom-switch-lg mb-3 text-center">
+                            {{ backlight_form.ir(class="custom-control-input", id="backlight-ir") }}
+                            <label class="custom-control-label font-weight-bold" for="backlight-ir">
+                                Enable IR Backlight
+                            </label>
                         </div>
+                        
+                        {% for error in backlight_form.ir.errors %}
+                        <div class="alert alert-danger small py-1" role="alert">
+                            <i class="fas fa-exclamation-triangle"></i> {{error}}
+                        </div>
+                        {% endfor %}
                     </div>
-                    <button type="submit" name="action" value="set" class="btn btn-info mb-2">Set</button>
+
+                    <button type="submit" name="action" value="set" class="btn btn-info btn-block">
+                        <i class="fas fa-save mr-2"></i> Apply Lighting
+                    </button>
                 </form>
-                {% for error in app_setting_form.systemDate.errors %}
-                <div class="alert alert-danger mt-2">
-                    {{ error }}
-                </div>
-                {% endfor %}
             </div>
         </div>
         

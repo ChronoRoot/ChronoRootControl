@@ -39,19 +39,6 @@
     <h1 class="mt-5">{{ config.SITE_NAME }}</h1>
     <p class="lead text-muted">{{ config.SITE_DESC }}</p>
 
-    <h2 class="sub-header mt-4"><i class="fas fa-stream text-secondary mr-2"></i>Schedule</h2>
-    
-    <div class="card shadow-sm mb-4">
-        <div class="card-body">
-            {# The Visualization Container #}
-            <div id="visualization" style="height: 350px; width: 100%;"></div>
-            
-            <div class="text-right mt-2 small text-muted">
-                <i class="fas fa-info-circle"></i> Timeline uses Server Time: <strong>{{ now }}</strong>
-            </div>
-        </div>
-    </div>
-
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="sub-header mb-0">Experiments List</h2>
         <div>
@@ -124,6 +111,17 @@
                 {% endfor %}
             </tbody>
         </table>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            {# The Visualization Container #}
+            <div id="visualization" style="height: 350px; width: 100%;"></div>
+            
+            <div class="text-right mt-2 small text-muted">
+                <i class="fas fa-info-circle"></i> Timeline uses Server Time: <strong>{{ now }}</strong>
+            </div>
+        </div>
     </div>
 
 {% endblock %}

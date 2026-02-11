@@ -10,6 +10,8 @@ except ImportError:
         from _thread import get_ident
         #this import works
 
+import logging
+logger = logging.getLogger(__name__)
 
 class CameraEvent(object):
     """An Event-like class that signals all active clients when a new frame is
@@ -18,15 +20,14 @@ class CameraEvent(object):
     def __init__(self):
         self.events = {}
 
-    def wait(self):
+    def wait(self, timeout=None):
         """Invoked from each client's thread to wait for the next frame."""
         ident = get_ident()
         if ident not in self.events:
-            # this is a new client
-            # add an entry for it in the self.events dict
-            # each entry has two elements, a threading.Event() and a timestamp
             self.events[ident] = [threading.Event(), time.time()]
-        return self.events[ident][0].wait()
+        
+        # Pass the timeout down to the threading.Event
+        return self.events[ident][0].wait(timeout)
 
     def set(self):
         """Invoked by the camera thread when a new frame is available."""
@@ -54,47 +55,66 @@ class CameraEvent(object):
 
 
 class BaseCamera(object):
-    thread = None  # background thread that reads frames from camera
-    frame = None  # current frame is stored here by background thread
+    thread = None  
+    frame = None  
     reset = False
-    last_access = 0  # time of last client access to the camera
-    cam_id = 1 # active camera
+    last_access = 0  
+    cam_id = 1 
     event = CameraEvent()
 
     def __init__(self, cam_id):
         self.cam_id = cam_id
-        """Start the background camera thread if it isn't running yet."""
         BaseCamera.cam_id = cam_id
+
+        # 1. Clear out "ghost" threads immediately
+        if BaseCamera.thread is not None and not BaseCamera.thread.is_alive():
+            logger.debug("Cleaning up dead thread reference.")
+            BaseCamera.thread = None
+            BaseCamera.reset = False
 
         if BaseCamera.thread is None:
             BaseCamera.last_access = time.time()
-
-            # start background frame thread
-            print('Starting camera thread with cam %s.' % self.cam_id)
+            logger.info('Starting camera thread with cam %s.' % self.cam_id)
             BaseCamera.thread = threading.Thread(target=self._thread)
             BaseCamera.thread.start()
 
-            # wait until frames are available
+            start_wait = time.time()
             while self.get_frame() is None:
-                time.sleep(0)
+                if time.time() - start_wait > 5.0:
+                    logger.error(f"Timeout: Camera {cam_id} thread failed to produce a frame on startup.")
+                    break
+                time.sleep(0.1)
+                
         else:
-            #start new thread
             BaseCamera.last_access = time.time()
             BaseCamera.reset = True
-            print("Thred %s already running. Starting a new one."%BaseCamera.thread)
-            while BaseCamera.thread is not None:
-                time.sleep(0)
+            logger.info("Thread %s already running. Requesting reset." % BaseCamera.thread.name)
+            
+            start_wait = time.time()
+            # 2. Check is_alive() so we don't wait on a dead thread
+            while BaseCamera.thread is not None and BaseCamera.thread.is_alive():
+                if time.time() - start_wait > 5.0:
+                    logger.error("Timeout: Old camera thread is deadlocked. Forcing overwrite.")
+                    BaseCamera.thread = None 
+                    break
+                time.sleep(0.1)
+            
+            # 3. CRITICAL: Clear the reset flag before the new thread spawns!
+            BaseCamera.reset = False 
             BaseCamera.thread = threading.Thread(target=self._thread)
             BaseCamera.thread.start()
-
-
 
     def get_frame(self):
         """Return the current camera frame."""
         BaseCamera.last_access = time.time()
 
-        # wait for a signal from the camera thread
-        BaseCamera.event.wait()
+        # FIX: Wait for a signal, but give up after 2 seconds
+        got_signal = BaseCamera.event.wait(timeout=2.0)
+        
+        if not got_signal:
+            logger.warning("get_frame timeout: Hardware stopped sending frames.")
+            return None # This triggers the None check in your Flask gen() function!
+
         BaseCamera.event.clear()
         return BaseCamera.frame
 
@@ -106,22 +126,32 @@ class BaseCamera(object):
     @classmethod
     def _thread(cls):
         """Camera background thread."""
-        frames_iterator = cls.frames(cls.cam_id)
-        for frame in frames_iterator:
-            BaseCamera.frame = frame
-            BaseCamera.event.set()  # send signal to clients
-            time.sleep(0)
+        try:
+            frames_iterator = cls.frames(cls.cam_id)
+            for frame in frames_iterator:
+                BaseCamera.frame = frame
+                BaseCamera.event.set()  # send signal to clients
+                time.sleep(0)
 
-            # if there hasn't been any clients asking for frames in
-            # the last 10 seconds then stop the thread
-            if time.time() - BaseCamera.last_access > 10:
-                frames_iterator.close()
-                print('Stopping camera thread due to inactivity.')
-                break
-            elif BaseCamera.reset:
-                frames_iterator.close()
-                print('Stopping camera thread as demanded.')
-                BaseCamera.reset = False
-                break
-
-        BaseCamera.thread = None
+                # if there hasn't been any clients asking for frames in
+                # the last 10 seconds then stop the thread
+                if time.time() - BaseCamera.last_access > 5:
+                    frames_iterator.close()
+                    logger.info('Stopping camera thread due to inactivity.')
+                    break
+                elif BaseCamera.reset:
+                    frames_iterator.close()
+                    logger.info('Stopping camera thread as demanded.')
+                    BaseCamera.reset = False
+                    break
+                    
+        except Exception as e:
+            logger.error(f"Camera background thread crashed: {e}")
+            
+        finally:
+            # This guarantees the thread variable is cleared even on a crash
+            logger.info("Background thread exiting. Cleaning up state.")
+            BaseCamera.thread = None
+            BaseCamera.reset = False
+            # Clear the event so any waiting get_frame() calls unblock immediately
+            BaseCamera.event.set()

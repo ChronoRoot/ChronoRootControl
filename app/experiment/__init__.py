@@ -63,7 +63,7 @@ def setuped_experiment(expid):
         actions = "editable"
     elif exp.status == "SETUP":
         actions = "new"
-    elif exp.status == "RUNNING":
+    elif exp.status == "RUNNING" or "ERROR":
         actions = "cancelable"
     else:
         actions = "readonly"

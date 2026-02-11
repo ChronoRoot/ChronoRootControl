@@ -9,7 +9,19 @@
 <div class="row mt-5">
     <div class="col-lg-9">
         
-        {% if is_locked %}
+        {% if has_hw_error %}
+            <div class="card border-danger shadow-sm">
+                <div class="card-body text-center p-5">
+                    <div class="text-danger mb-3"><i class="fas fa-exclamation-triangle fa-4x"></i></div>
+                    <h3 class="card-title text-dark">Camera Hardware Error</h3>
+                    <p class="lead">The system reported a failure for <strong>Camera {{ cam_id }}</strong>.</p>
+                    <div class="alert alert-secondary">Status: {{ cam_health }}</div>
+                    <p class="text-muted">Check ribbon cables and power, then run a <strong>Hardware Diagnostic</strong>.</p>
+                    <a href="{{ url_for('config_page.conf') }}" class="btn btn-danger">Go to Diagnostics</a>
+                </div>
+            </div>
+
+        {% elif is_locked %}
             <div class="card border-warning shadow-sm">
                 <div class="card-body text-center p-5">
                     <div class="text-warning mb-3">
