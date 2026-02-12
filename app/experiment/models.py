@@ -66,45 +66,52 @@ class Experiment(object):
         instance.status_update()
         return instance
 
-    # --- Properties ---
+# --- Properties ---
     @property
     def start(self):
-        # Return a datetime object from the stored string
-        try:
-            return datetime.strptime(self._start, Config.PRETTY_FORMAT)
-        except (ValueError, TypeError):
-            return datetime.now()
+        return self._parse_date_string(self._start)
 
     @start.setter
     def start(self, value):
-        # Handle both string inputs and datetime objects
-        if isinstance(value, str):
-            try:
-                # Validate format by parsing, then re-format ensures consistency
-                dt = datetime.strptime(value, Config.PRETTY_FORMAT)
-                self._start = dt.strftime(Config.PRETTY_FORMAT)
-            except ValueError:
-                self._start = value
-        elif isinstance(value, datetime):
-            self._start = value.strftime(Config.PRETTY_FORMAT)
+        self._start = self._format_date_input(value)
 
     @property
     def end(self):
-        try:
-            return datetime.strptime(self._end, Config.PRETTY_FORMAT)
-        except (ValueError, TypeError):
-            return datetime.now()
+        return self._parse_date_string(self._end)
 
     @end.setter
     def end(self, value):
-        if isinstance(value, str):
+        self._end = self._format_date_input(value)
+
+    # --- Helper Methods for Robust Parsing ---
+    def _parse_date_string(self, date_str):
+        """Attempts to parse string into datetime, handling old and new formats."""
+        if not date_str or not isinstance(date_str, str):
+            return datetime.now()
+
+        # List of formats to try: [New Format, Old Format with TZ]
+        formats = [Config.PRETTY_FORMAT, "%Y-%m-%d %H:%M:%S%z"]
+        
+        for fmt in formats:
             try:
-                dt = datetime.strptime(value, Config.PRETTY_FORMAT)
-                self._end = dt.strftime(Config.PRETTY_FORMAT)
+                dt = datetime.strptime(date_str, fmt)
+                # If it has timezone info, strip it to maintain consistency with new data
+                return dt.replace(tzinfo=None) 
             except ValueError:
-                self._end = value
-        elif isinstance(value, datetime):
-            self._end = value.strftime(Config.PRETTY_FORMAT)
+                continue
+        
+        # Fallback if everything fails
+        return datetime.now()
+
+    def _format_date_input(self, value):
+        """Ensures setters always save in the NEW format."""
+        if isinstance(value, datetime):
+            return value.strftime(Config.PRETTY_FORMAT)
+        elif isinstance(value, str):
+            # Parse it first to validate/clean it, then re-format to new standard
+            dt = self._parse_date_string(value)
+            return dt.strftime(Config.PRETTY_FORMAT)
+        return value
 
     # --- Methods ---
     def status_update(self):
