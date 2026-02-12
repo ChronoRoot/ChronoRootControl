@@ -44,8 +44,6 @@ class Config(object):
     LOCK_FILE = "/tmp/cam.lock"
     LOCK_TIMEOUT = 5
 
-
-
     CAMS = (1, 2, 3, 4) # CAMERAS PRESENCE & DISPOSITION
                         # possible values:
                         # One cam :  (1, ), (2, ), (3, ), (4, )
@@ -60,7 +58,7 @@ class Config(object):
     CAM_WAIT_AFTER_RETRAY = 10
 
     MAX_WAIT = 100 # time to wait to another experience to terminate, min 5
-    STREAM_RESOLUTION = (1640, 1232)
+    STREAM_RESOLUTION = (800, 600)
     IR_GPIO = 32
     IR_WARM_UP = 10
 
