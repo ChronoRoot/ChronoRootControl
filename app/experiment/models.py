@@ -22,7 +22,7 @@ class Experiment(object):
         self.status = "SETUP"
         self.message = ""
         
-        # Times (Default to Now)
+        # Times
         now_str = datetime.now().strftime(Config.PRETTY_FORMAT)
         self.creation = now_str
         self.modification = ""
@@ -34,13 +34,13 @@ class Experiment(object):
         self.next_run_time = ""
         self.workdir = ""
         
-        # Mutable defaults (Fresh lists per instance)
+        # Mutable defaults
         self.cameras = []
         self.ir = False
         self.steps = []
         self.img_params = Config.CAM_PARAMS.copy() if Config.CAM_PARAMS else {}
         
-        # Logs
+        # Logs: Transient list, populated from log.txt
         self.logs = []
 
     @classmethod
@@ -54,18 +54,75 @@ class Experiment(object):
         
         json_path = os.path.join(instance.workdir, 'info.json')
         
-        # STRICT CHECK: If file doesn't exist, fail immediately.
         if not os.path.exists(json_path):
             raise FileNotFoundError(f"Experiment {expid} not found at {json_path}")
             
         with open(json_path, 'r') as f:
             data = json.load(f)
             instance.from_dict(data)
+        
+        # Load logs from the text file into memory
+        instance.load_logs()
             
         instance.status_update()
         return instance
 
-# --- Properties ---
+    def load_logs(self):
+        """
+        Reads log.txt line by line and populates self.logs
+        Format: YYYY-MM-DD HH:MM:SS | Description
+        """
+        self.logs = []
+        if not self.workdir: return
+
+        log_path = os.path.join(self.workdir, 'log.txt')
+        if not os.path.exists(log_path):
+            return
+
+        try:
+            with open(log_path, 'r') as f:
+                lines = f.readlines()
+                
+            for index, line in enumerate(lines):
+                # Split only on the first separator
+                parts = line.strip().split(" | ", 1)
+                if len(parts) == 2:
+                    timestamp, description = parts
+                    self.logs.append({
+                        "id": index + 1,
+                        "timestamp": timestamp,
+                        "description": description
+                    })
+        except Exception as e:
+            print(f"Error reading log file: {e}")
+
+    def log_event(self, description):
+        """
+        1. Updates memory (self.logs) for immediate UI display.
+        2. Appends to log.txt on disk.
+        Does NOT touch info.json.
+        """
+        if not self.workdir:
+            self.generate_id()
+
+        timestamp = datetime.now().strftime(Config.PRETTY_FORMAT)
+        
+        # Update Memory
+        self.logs.append({
+            "id": len(self.logs) + 1,
+            "timestamp": timestamp,
+            "description": description
+        })
+
+        # Update Disk (Text File)
+        log_path = os.path.join(self.workdir, 'log.txt')
+        try:
+            with open(log_path, 'a') as f:
+                f.write(f"{timestamp} | {description}\n")
+        except Exception as e:
+            print(f"Failed to write to log.txt: {e}")
+
+    # --- Properties & Helper Methods ---
     @property
     def start(self):
         return self._parse_date_string(self._start)
@@ -82,37 +139,26 @@ class Experiment(object):
     def end(self, value):
         self._end = self._format_date_input(value)
 
-    # --- Helper Methods for Robust Parsing ---
     def _parse_date_string(self, date_str):
-        """Attempts to parse string into datetime, handling old and new formats."""
         if not date_str or not isinstance(date_str, str):
             return datetime.now()
-
-        # List of formats to try: [New Format, Old Format with TZ]
         formats = [Config.PRETTY_FORMAT, "%Y-%m-%d %H:%M:%S%z"]
-        
         for fmt in formats:
             try:
                 dt = datetime.strptime(date_str, fmt)
-                # If it has timezone info, strip it to maintain consistency with new data
                 return dt.replace(tzinfo=None) 
             except ValueError:
                 continue
-        
-        # Fallback if everything fails
         return datetime.now()
 
     def _format_date_input(self, value):
-        """Ensures setters always save in the NEW format."""
         if isinstance(value, datetime):
             return value.strftime(Config.PRETTY_FORMAT)
         elif isinstance(value, str):
-            # Parse it first to validate/clean it, then re-format to new standard
             dt = self._parse_date_string(value)
             return dt.strftime(Config.PRETTY_FORMAT)
         return value
 
-    # --- Methods ---
     def status_update(self):
         self.schedulerstatus.load()
         if self.schedulerstatus.state and 'jobs' in self.schedulerstatus.state:
@@ -122,19 +168,13 @@ class Experiment(object):
                 self.next_run_time = "Not in scheduler"
 
     def generate_id(self):
-        """
-        Generates a unique ID using:
-        Hostname + Scheduled Start Time.
-        
-        Example: mypi_2026-02-05_14-00-00
-        """
         if self.expid == 'system': return
-        
-        # Access the datetime object via the property
         start_dt = self.start
         date_str = start_dt.strftime(Config.DATE_FORMAT)
         self.expid = "%s_%s" % (socket.gethostname(), date_str)
         self.workdir = os.path.join(Config.WORKING_DIR, self.expid)
+        if not os.path.exists(self.workdir):
+            os.makedirs(self.workdir)
 
     def from_dict(self, data):
         for key, value in data.items():
@@ -142,6 +182,9 @@ class Experiment(object):
                 setattr(self, key, value)
 
     def to_dict(self):
+        """
+        Serializes experiment data for info.json.
+        """
         return {
             "expid": self.expid,
             "desc": self.desc,
@@ -157,14 +200,12 @@ class Experiment(object):
             "ir": self.ir,
             "steps": self.steps,
             "workdir": self.workdir,
-            "img_params": self.img_params,
-            "logs": self.logs
+            "img_params": self.img_params
         }
 
     def save(self):
         """
-        Saves the experiment to disk ATOMICALLY.
-        This prevents the 'empty file' race condition.
+        Saves experiment METADATA to info.json.
         """
         if not self.expid:
             self.generate_id()
@@ -173,8 +214,6 @@ class Experiment(object):
             os.makedirs(self.workdir)
             
         self.modification = datetime.now().strftime(Config.PRETTY_FORMAT)
-        
-        # Define the target path and a temporary path
         target_path = os.path.join(self.workdir, 'info.json')
         
         with open(target_path, 'w+') as f:
@@ -183,12 +222,10 @@ class Experiment(object):
             os.fsync(f.fileno()) 
 
     def create(self):
-        """Launch the experiment"""
-        # RULE: SETUP -> NEW
         self.status = "NEW"
+        self.log_event("Experiment created.")
         self.save() 
         
-        # Notify Scheduler
         message = {'id': self.expid, 'action': 'CREATE'}
         uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
 
@@ -198,28 +235,23 @@ class Experiment(object):
         
         self.status = "CANCELLED"
         self.message = "Stop requested by user."
+        self.log_event("Experiment cancelled by user.")
         self.save()
         self.status_update() 
 
     def delete(self):
-        # To delete an experiment, it should be CANCELED or FINISHED
         if self.status != "CANCELLED" or self.status != "FINISHED":
             if os.path.exists(self.workdir):
                 shutil.rmtree(self.workdir)
                 
     def diagnostic(self):
-        """
-        Trigger the hardware diagnostic via the uWSGI mule.
-        """
         self.status = "DIAGNOSTICS"
         self.message = "Hardware scan requested..."
         
-        # 1. Set Time Window 
         now = datetime.now()
         self.start = now
         self.end = now + timedelta(minutes=8)
 
-        # 2. Ensure ID (System)
         self.expid = 'system'
         self.workdir = os.path.join(Config.WORKING_DIR, 'system')
 
@@ -231,18 +263,3 @@ class Experiment(object):
         }
         
         uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
-    
-    def log_event(self, description):
-        """
-        Adds a timestamped event to the logs list.
-        Caller must invoke save() to persist this to disk.
-        """
-        if not isinstance(self.logs, list):
-            self.logs = []
-
-        event = {
-            "id": len(self.logs) + 1,
-            "timestamp": datetime.now().strftime(Config.PRETTY_FORMAT),
-            "description": description
-        }
-        self.logs.append(event)
