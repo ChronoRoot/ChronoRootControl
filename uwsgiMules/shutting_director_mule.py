@@ -73,7 +73,6 @@ def shed_evt_job_executed(event):
     # If it was SCHEDULED, NEW, or ERROR, but it just ran successfully, set it to RUNNING.
     if exp.status in ["SCHEDULED", "NEW", "ERROR"]:
         exp.status = "RUNNING"
-        exp.message = "Running successfully."
         exp.save()
         log.info(f"Experiment {exp.expid} recovered/started -> RUNNING")
     
@@ -189,12 +188,15 @@ class ChiefOperator(object):
             if exp.end < now:
                 if exp.status != 'FINISHED':
                     self.logger.info(f"Exp {exp.expid} expired while offline. Marking FINISHED.")
+                    exp.log_event("Experiment expired while offline. Marking as FINISHED.")
                     exp.status = "FINISHED"
                     exp.save()
                 continue
 
             if exp.expid not in running_jobs:
                 self.logger.info(f"Restoring job: {exp.expid}")
+                exp.log_event("Resync after reboot: Job restored to scheduler.")
+                exp.save()
                 self.schedule_job(exp.expid)
             else:
                 self.logger.info(f"Job {exp.expid} is already active.")

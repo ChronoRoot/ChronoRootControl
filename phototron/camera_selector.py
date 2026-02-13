@@ -3,7 +3,7 @@
 
 '''
 Created on 8 mars 2018
-Updated for Stability: Feb 2026
+Modified on Feb 2026 by Nicolás Gaggion
 
 @author: Vladimir Daric
 @email: "vladimir.daric@cnrs.fr"
@@ -80,12 +80,7 @@ class Selector(object):
 ## IVPort_v2 Implementation
 #################################
 
-# Ensure this import works in your file structure
-try:
-    from ivport_v2 import ivport
-except ImportError:
-    print("CRITICAL ERROR: Could not import 'ivport_v2.ivport'. Check your directory structure.")
-    # We don't exit here to allow the script to be imported, but it will fail at runtime if not fixed.
+from ivport_v2 import ivport
 
 class IVPort_v2(Selector):
     """IVPort_v2 module implementation with stability fixes
@@ -98,7 +93,6 @@ class IVPort_v2(Selector):
         self.logger = self._get_logger()
         self.logger.debug("IVPort_v2 object initializing...")
         
-        # FIX: Initialize the lock to prevent AttributeError in is_free()
         self.lock = threading.Lock()
         
         self.camera_type = Config.CAMERA_TYPE
@@ -121,7 +115,6 @@ class IVPort_v2(Selector):
         self.logger.debug("IVPort_v2 object initialized successfully")
 
     def __del__(self):
-        # FIX: Safer deletion to avoid crashes if init failed
         if hasattr(self, 'logger'):
             self.logger.debug('deleting : %s'%(self))
         
@@ -136,8 +129,6 @@ class IVPort_v2(Selector):
 
     def is_free(self):
         """returns true only if the lock is NOT acquired"""
-        # Note: Threading locks don't have is_locked() in older python versions.
-        # This is a non-blocking check.
         locked = self.lock.acquire(blocking=False)
         if locked:
             self.lock.release()
@@ -145,10 +136,6 @@ class IVPort_v2(Selector):
         return False
 
     def enable_cam(self, port):
-        # Optimization: Don't switch if we are already there!
-        if self.iv.camera == port:
-            return
-
         self.logger.debug(f"Switching to camera port {port}")
         self.iv.camera_change(port)
         time.sleep(0.2)
@@ -187,9 +174,6 @@ class IVPort_v2(Selector):
             raise e
             
         finally:
-            # FIX: Resource Management
-            # We must close the camera software connection before we allow 
-            # the system to switch ports again later.
             if camera and hasattr(camera, 'close'):
                 camera.close()
 
@@ -199,21 +183,18 @@ class IVPort_v2(Selector):
 
 
     def self_check(self):
-        """Test if multiplexer is working using external tool"""
+        """Test if multiplexer is working"""
         try:
-            # FIX: Use list format for subprocess
-            result = subprocess.run(["tools/multiplexer_detected"], capture_output=True)
+            result = subprocess.run(['i2cget', '-y', '1', '0x10'], 
+                                   capture_output=True)
             return result.returncode == 0
-        except FileNotFoundError:
-            self.logger.error("tools/multiplexer_detected binary not found.")
-            return False
         except Exception as e:
             self.logger.error(f"Self check failed: {e}")
             return False
 
     def probe(self, camera_id):
         """
-        Checks if a camera is responsive on the I2C bus at a specific port.
+        Checks if a camera is responsive on the I2C bus.
         """
         try:
             # Switch the mux

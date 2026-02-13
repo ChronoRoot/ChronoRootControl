@@ -3,14 +3,15 @@
 A web interface to control a ChronoRoot module.
 {: .lead }
 
-**Copyright:** 2016-2025 IPS2
-**Version:** v1.5.1
+**Copyright:** 2016-2026 IPS2
+**Version:** v1.6.0
 **Licence:** CeCILL 2.1
 
 ## Contributors
 
 - Thomas Blein
 - Vladimir Daric
+- Nicolás Gaggion
 
 ## Reference
 
@@ -43,5 +44,6 @@ Nicolás Gaggion¹, Federico Ariel², Vladimir Daric³, Éric Lambert³, Simon L
 ## Links
 
 - [IPS2 website](http://ips2.u-psud.fr)
-- [ChronoRootControl source code](http://github.com/ThomasBlein/ChronoRootControl)
-- [ChronoRoot2 image analysis pipeline](https://github.com/ngaggion/ChronoRoot2)
+- [ChronoRoot Main Website](https://chronoroot.github.io/)
+- [ChronoRootControl source code](https://github.com/ChronoRoot/ChronoRootControl)
+- [ChronoRoot2 image analysis pipeline](https://github.com/ChronoRoot/ChronoRoot2)

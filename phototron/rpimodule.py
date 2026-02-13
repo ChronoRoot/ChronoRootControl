@@ -3,7 +3,7 @@
 
 '''
 Created on 26 févr. 2018
-Refactored: Feb 2026 
+Refactored: Feb 2026 by Nicolás Gaggion
 
 @author: Vladimir Daric
 @email: vladimir.daric@cnrs.fr
@@ -59,137 +59,137 @@ class RpiModule(object):
     def _get_logger(self):
         return logging.getLogger(__name__)
 
+    def _capture_single_camera(self, camera, xpid, params, report_func):
+        """
+        Helper: Handles the probe and capture for a SINGLE camera.
+        Returns: (success: bool, data: tuple/None, error: str/None)
+        """
+        now_obj = datetime.now()
+        timestamp_log = now_obj.strftime(Config.PRETTY_FORMAT)
+        timestamp_file = now_obj.strftime(Config.DATE_FORMAT)
+        
+        # 1. Prepare Paths
+        camdir = os.path.join(Config.WORKING_DIR, xpid, str(camera))
+        os.makedirs(camdir, exist_ok=True)
+        imagepath = os.path.join(camdir, f'{timestamp_file}_{camera}.png')
+        
+        report_func(cam_id=camera, cam_status={"health": "CAPTURING", "last_check": timestamp_log})
+
+        try:
+            # 2. PROBE: Switch Mux and Verify
+            if not self.selector.probe(camera):
+                self.logger.warning(f"Cam {camera} probe failed. Retrying...")
+                time.sleep(0.5)
+                if not self.selector.probe(camera):
+                     raise RuntimeError(f"Not detected on bus")
+
+            # 3. CAPTURE
+            if self.selector.capture(camera, imagepath, params):
+                rel_path = f"{xpid}/{camera}/{timestamp_file}_{camera}.png"
+                report_func(cam_id=camera, last_pic=True, cam_status={
+                    "health": "OK",
+                    "last_check": timestamp_log,
+                    "path": rel_path
+                })
+                # Return success data
+                return True, (timestamp_file, camera, imagepath), None
+            else:
+                raise RuntimeError("Capture returned False")
+
+        except Exception as e:
+            self.logger.error(f"FAIL Camera {camera}: {e}")
+            report_func(cam_id=camera, cam_status={"health": "FAILED", "last_check": timestamp_log, "path": None})
+            return False, None, str(e)
+        
     @staticmethod
     def take_picture(xpid, status_manager=None):
-        """
-        Takes the requested pictures. 
-        Raises exceptions on failure so the Scheduler can handle errors.
-        """
         
         def report(state=None, cam_id=None, cam_status=None, last_pic=False):
             if status_manager:
-                status_manager.update_hardware_status(
-                    state=state, 
-                    cam_id=cam_id, 
-                    cam_status=cam_status, 
-                    last_pic=last_pic
-                )
+                status_manager.update_hardware_status(state, cam_id, cam_status, last_pic)
 
-        # 1. Get Singleton (Safe Hardware Access)
         rpi = RpiModule() 
-        rpi.logger.info(f'taking picture for task : {xpid}')
-        light = rpi.light
+        rpi.logger.info(f'Starting sequence for: {xpid}')
         
         # Load Experiment
         try:
             exp = Experiment.load_from_id(xpid)
-        except Exception as e:
-            rpi.logger.error(f"Failed to load experiment {xpid}: {e}")
-            raise e # RESTORED: Let scheduler know the DB failed
+        except Exception:
+            raise RuntimeError(f"Experiment {xpid} not found or failed to load.")
 
-        cameras = exp.cameras
-        params = exp.img_params
-
-        # 2. Hardware Self-Check
+        # Hardware Check
         if not rpi.selector.self_check():
-             msg = 'Multiplexer fatal error during self-check'
+             msg = "Multiplexer fatal error"
              rpi.logger.error(msg)
              report(state="MULTIPLEXER_ERROR")
              exp.status = "ERROR"
              exp.message = msg
              exp.save()
-             raise RuntimeError(msg) # RESTORED: Raise error for scheduler
+             raise RuntimeError(msg) 
         
         report(state="OK")
-
-        # 3. Acquisition Loop
+        
+        # --- Main Retry Loop (For Lock Only) ---
         retries = 0
         while retries < Config.CAM_RETRIES:
             retries += 1
             try:
-                # Attempt to get lock (With Timeout)
                 with rpi.lock.acquire(timeout=Config.LOCK_TIMEOUT):
                     if status_manager:
-                        status_manager.update_lock_state(status="LOCKED", owner="Scheduler", details=f"Exp {xpid}")
-
-                    rpi.logger.info('Hardware lock acquired')
+                        status_manager.update_lock_state("LOCKED", "Scheduler", f"Exp {xpid}")
 
                     try:
-                        # --- Turn Lights ON ---
+                        # 1. Lights ON
                         if exp.ir:
-                            light.state = Light.ON
-                            params["exposure_mode"] = "backlight"
+                            rpi.light.state = Light.ON
+                            exp.img_params["exposure_mode"] = "backlight"
                         else:
-                            light.state = Light.OFF
+                            rpi.light.state = Light.OFF
 
-                        # --- Capture Sequence ---
                         step_images = []
+                        failed_cameras = [] 
                         
-                        for camera in cameras:
-                            if camera not in Config.CAMS:
-                                continue 
+                        # 2. Iterate Cameras
+                        for camera in exp.cameras:
+                            if camera not in Config.CAMS: continue 
                             
-                            now_obj = datetime.now()
-                            timestamp_log = now_obj.strftime(Config.PRETTY_FORMAT)
-                            timestamp_file = now_obj.strftime(Config.DATE_FORMAT)
-
-                            report(cam_id=camera, cam_status={"health": "CAPTURING", "last_check": timestamp_log})
+                            success, data, error = rpi._capture_single_camera(camera, xpid, exp.img_params, report)
                             
-                            camdir = os.path.join(exp.workdir, str(camera))
-                            os.makedirs(camdir, exist_ok=True)
-                            imagepath = os.path.join(camdir, f'{timestamp_file}_{camera}.png')
-
-                            # Perform Capture
-                            success = rpi.selector.capture(camera, imagepath, params)
-
                             if success:
-                                step_images.append((timestamp_file, camera, imagepath))
-                                rel_path = f"{xpid}/{camera}/{timestamp_file}_{camera}.png"
-                                report(cam_id=camera, last_pic=True, cam_status={
-                                    "health": "OK",
-                                    "last_check": timestamp_log,
-                                    "path": rel_path
-                                })
+                                step_images.append(data)
                             else:
-                                # Logic failure (Camera didn't crash, but didn't return image)
-                                msg = f"Camera {camera} failed to return image."
-                                rpi.logger.error(msg)
-                                report(cam_id=camera, cam_status={"health": "FAILED", "last_check": timestamp_log, "path": None})
-                                raise RuntimeError(msg) # RESTORED: Treat as failure
+                                failed_cameras.append((camera, error))
 
-                        # --- Success ---
-                        if len(step_images) > 0:
-                            if hasattr(exp, 'new_step'):
-                                exp.new_step(tuple(step_images))
-                            exp.message = "OK"
-                            rpi.logger.info("Sequence completed successfully.")
-                            return True
-                        else:
-                            msg = "No images captured (List empty)."
-                            rpi.logger.warning(msg)
-                            raise RuntimeWarning(msg) # RESTORED
-
-                    except Exception as e:
-                        # CRITICAL: Catch errors during capture, log, and RE-RAISE
-                        rpi.logger.error(f"Critical error during capture: {e}")
-                        report(state="MULTIPLEXER_ERROR")
-                        raise e 
+                        # 3. Finalize & Log
                         
-                    finally:
-                        # Safety: Ensure lights are off even if we crash/raise
-                        light.state = Light.OFF
+                        # A. Log Failures 
+                        if failed_cameras:
+                            if not hasattr(exp, 'logs'): exp.logs = []
+                            
+                            for cam_id, err_msg in failed_cameras:
+                                log_description = f"Camera {cam_id} failed: {err_msg}"
+                                exp.log_event(log_description)
+                                rpi.logger.warning(f"Logged failure for Cam {cam_id}")
+                            exp.save()
+                            
+                        # B. Save Successes
+                        if len(step_images) > 0:
+                            return True
+                        
+                        else:
+                            msg = f"All cameras failed. Errors: {[x[1] for x in failed_cameras]}"
+                            rpi.logger.error(msg)
+                            raise RuntimeError(msg)
+
+                    finally:  
+                        rpi.light.state = Light.OFF
                         if status_manager:
-                            status_manager.update_lock_state(status="FREE", owner=None, details=None)
+                            status_manager.update_lock_state("FREE", None, None)
 
             except Timeout:
-                rpi.logger.warning(f"Lock busy. Retry {retries}/{Config.CAM_RETRIES}")
-                if retries >= Config.CAM_RETRIES:
-                     raise Timeout(f"Could not acquire hardware lock after {retries} retries") # RESTORED
+                rpi.logger.warning(f"Lock busy. Retry {retries}")
+                time.sleep(Config.CAM_WAIT_AFTER_RETRAY)
 
-            # If we are here, we are retrying the loop...
-            time.sleep(Config.CAM_WAIT_AFTER_RETRAY)
-
-        # Should be unreachable if Timeout raises above, but just in case:
         raise Timeout("Hardware lock acquisition failed.")
 
     @staticmethod
@@ -272,7 +272,7 @@ class RpiModule(object):
             # raise Timeout("Diagnostic scan failed: Locked")
             return {"error": "LOCKED"} 
         except Exception as e:
-            report(state="MULTIPLEXER_ERROR")
+            report(state="ERROR")
             # raise e  <-- You can uncomment this if you want check_cameras to crash the caller too
             return {"error": str(e)}
         

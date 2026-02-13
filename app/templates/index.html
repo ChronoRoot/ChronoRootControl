@@ -144,7 +144,6 @@
         // Create a DataSet (allows two way data-binding)
         var items = new vis.DataSet([
             {% for exp in exps.exps %}
-                {% if exp.status != 'ERROR' %} 
                 {
                     id: '{{ exp.expid }}',
                     content: '{{ exp.expid }}',
@@ -154,7 +153,6 @@
                     group: '{{ exp.status }}',
                     style: 'background-color: {{ palette[loop.index0 % 10] }}; color: white;'
                 },
-                {% endif %}
             {% endfor %}
         ]);
 
@@ -179,6 +177,7 @@
             {id: 'SCHEDULED',   content: 'Scheduled'},
             {id: 'FINISHED',    content: 'Finished'},
             {id: 'CANCELLED',   content: 'Cancelled'}, 
+            {id: 'ERROR',       content: 'Error'}
         ]);
 
         // --- D. Configuration ---
@@ -186,7 +185,7 @@
         
         var options = {
             groupOrder: function (a, b) {
-                var order = ['DIAGNOSTIC', 'NEW', 'RUNNING', 'SCHEDULED', 'FINISHED', 'CANCELLED'];
+                var order = ['DIAGNOSTICS', 'NEW', 'RUNNING', 'SCHEDULED', 'FINISHED', 'CANCELLED', 'ERROR'];
                 return order.indexOf(a.id) - order.indexOf(b.id);
             },
             editable: false,

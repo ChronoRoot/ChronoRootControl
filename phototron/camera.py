@@ -3,6 +3,7 @@
 
 '''
 Created on 8 mars 2018
+Modified on Feb 2026 by Nicolás Gaggion
 
 @author: Vladimir Daric
 email: "vladimir.daric@cnrs.fr"
@@ -13,13 +14,8 @@ from config import Config
 import subprocess
 import time
 import io
-try:
-    from picamera import PiCamera, PiCameraMMALError
-    from PIL import Image
-except ImportError:
-    PiCamera = None
-    PiCameraMMALError = None
-    Image = None
+from picamera import PiCamera, PiCameraMMALError
+from PIL import Image
 
 class CameraFactory(object):
     """Factroy class to manage different camera modules
@@ -127,7 +123,7 @@ class RaspiCamera(Camera):
 
                     # 3. The Grayscale Logic
                     if params.get('exposure_mode') == "backlight":
-                        self.logger.debug("Capturing Hardware Grayscale")
+                        self.logger.debug("Capturing picture grayscale")
                         
                         # FORCE hardware to output Y-channel into RGB slots
                         # (128, 128) means "Zero Color"
@@ -148,7 +144,7 @@ class RaspiCamera(Camera):
                         y_channel.save(image_path)
                         
                     else:
-                        self.logger.debug("Capturing Color")
+                        self.logger.debug("Capturing picture color")
                         camera.capture(image_path, 'png')
 
                 return True

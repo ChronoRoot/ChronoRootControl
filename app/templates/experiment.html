@@ -260,51 +260,30 @@
     </div>
 </form>
 
+{# --- Logs Visualization Section --- #}
 {% if exp.logs %}
-<div class="row mt-4">
+<div class="row mt-4 mb-5">
     <div class="col-12">
         <div class="card shadow-sm">
-            <div class="card-header bg-light"><h5 class="mb-0"><i class="fas fa-history mr-2"></i>Event Logs</h5></div>
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="fas fa-history mr-2"></i>Event Logs</h5>
+            </div>
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover table-striped mb-0">
                     <thead class="thead-light">
                         <tr>
-                            <th>#</th>
-                            <th>Status</th>
-                            <th>Time</th>
-                            <th>Cameras</th>
-                            <th>Details</th>
+                            <th style="width: 5%">#</th>
+                            <th style="width: 25%">Timestamp</th>
+                            <th>Description</th>
                         </tr>
-                    </thead>{# 3. NEW & SCHEDULED: Can Modify, Save, Cancel, and Delete #}
-                    {% elif is_modifiable %}
-                        <button type="submit" name="action" value="save" class="btn btn-primary btn-block mb-3">
-                            <i class="fas fa-save mr-2"></i> Save Changes
-                        </button>
-
-                        <button type="submit" name="action" value="cancel" class="btn btn-warning btn-block mb-2">
-                            <i class="fas fa-ban mr-2"></i> Cancel
-                        </button>
-                        
-                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" onclick="return confirm('Permanently delete this experiment?')">
-                            <i class="fas fa-trash-alt mr-2"></i> Delete
-                        </button>
+                    </thead>
                     <tbody>
-                        {% for logentry in exp.logs %}
-                        <tr class="{% if logentry.status == 'FINISHED' %}table-success{% elif logentry.status == 'ERROR' %}table-danger{% elif logentry.status == 'CANCELLED' %}table-warning{% endif %}">
-                            <td>{{ logentry.id }}</td>
-                            <td><strong>{{ logentry.status }}</strong></td>
-                            <td>{{ logentry.date }}</td>
-                            <td>
-                                {% for camera in logentry.cameras %}
-                                <span class="badge badge-secondary">{{ camera }}</span>
-                                {% endfor %}
-                            </td>
-                            <td>
-                                {{ logentry.info }}
-                                {% for file in logentry.files %}
-                                    <br><small><i class="far fa-file-image"></i> {{ file }}</small>
-                                {% endfor %}
-                            </td>
+                        {# Iterate through logs in reverse order (newest first) #}
+                        {% for log in exp.logs|reverse %}
+                        <tr>
+                            <td>{{ log.id }}</td>
+                            <td>{{ log.timestamp }}</td>
+                            <td>{{ log.description }}</td>
                         </tr>
                         {% endfor %}
                     </tbody>

@@ -11,7 +11,6 @@ class Experiment(object):
     def __init__(self):
         """
         Initialize a blank/draft experiment with default values.
-        Does NOT access disk. Does NOT generate an ID yet.
         """        
         # Lazy import to avoid circular dependency
         from app.options.schedulerstatus import SchedulerStatus
@@ -211,20 +210,18 @@ class Experiment(object):
     def diagnostic(self):
         """
         Trigger the hardware diagnostic via the uWSGI mule.
-        RULE: Always set to last 10 minutes from NOW.
         """
         self.status = "DIAGNOSTICS"
         self.message = "Hardware scan requested..."
         
-        # 1. Set Time Window (Now -> Now + 10min)
+        # 1. Set Time Window 
         now = datetime.now()
         self.start = now
         self.end = now + timedelta(minutes=8)
 
-        # 2. Ensure ID (System or temp)
-        if not self.expid: 
-            self.expid = 'system'
-            self.workdir = os.path.join(Config.WORKING_DIR, 'system')
+        # 2. Ensure ID (System)
+        self.expid = 'system'
+        self.workdir = os.path.join(Config.WORKING_DIR, 'system')
 
         self.save() 
         
@@ -234,3 +231,18 @@ class Experiment(object):
         }
         
         uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
+    
+    def log_event(self, description):
+        """
+        Adds a timestamped event to the logs list.
+        Caller must invoke save() to persist this to disk.
+        """
+        if not isinstance(self.logs, list):
+            self.logs = []
+
+        event = {
+            "id": len(self.logs) + 1,
+            "timestamp": datetime.now().strftime(Config.PRETTY_FORMAT),
+            "description": description
+        }
+        self.logs.append(event)
