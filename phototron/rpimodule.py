@@ -119,13 +119,16 @@ class RpiModule(object):
 
         # Hardware Check
         if not rpi.selector.self_check():
-             msg = "Multiplexer fatal error"
-             rpi.logger.error(msg)
-             report(state="MULTIPLEXER_ERROR")
-             exp.status = "ERROR"
-             exp.message = msg
-             exp.save()
-             raise RuntimeError(msg) 
+            msg = "Multiplexer fatal error"
+            rpi.logger.error(msg)
+            report(state="MULTIPLEXER_ERROR")
+            if exp.status == "ERROR":
+                raise RuntimeError(msg) 
+            else:
+                exp.status = "ERROR"
+                exp.message = msg
+                exp.save()
+                raise RuntimeError(msg) 
         
         report(state="OK")
         
@@ -170,16 +173,26 @@ class RpiModule(object):
                                 log_description = f"Camera {cam_id} failed: {err_msg}"
                                 exp.log_event(log_description)
                                 rpi.logger.warning(f"Logged failure for Cam {cam_id}")
-                            exp.save()
                             
                         # B. Save Successes
                         if len(step_images) > 0:
+                            if exp.status == "ERROR":
+                                exp.status = "RUNNING"
+                                exp.message = "Recovered from error"
+                                exp.save()
                             return True
                         
                         else:
                             msg = f"All cameras failed. Errors: {[x[1] for x in failed_cameras]}"
                             rpi.logger.error(msg)
-                            raise RuntimeError(msg)
+                        
+                            if exp.status != "ERROR":
+                                exp.status = "ERROR"
+                                exp.message = msg
+                                exp.save()
+                                raise RuntimeError(msg) 
+                            else:
+                                raise RuntimeError(msg) 
 
                     finally:  
                         rpi.light.state = Light.OFF

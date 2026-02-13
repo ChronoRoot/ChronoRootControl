@@ -54,8 +54,11 @@ def load_exp_safe(expid):
 def end_experiment(exp):
     if not exp: return
     scheduler_status.remove_experiment(exp.expid)
-    exp.status = "FINISHED"
-    exp.save()
+    # check if status wasn't finished
+    if exp.status != "FINISHED":
+        exp.message = "Experiment completed."
+        exp.status = "FINISHED"
+        exp.save()
 
 # --- SCHEDULER CALLBACKS ---
 
@@ -83,29 +86,14 @@ def shed_evt_job_error(event):
     exp = load_exp_safe(event.job_id)
     if not exp: return
 
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     error_msg = str(event.exception)
-
-    # 1. Log the failure in the experiment history (Timeline)
-    # This ensures you see the red row in the "Event Logs" table
-    new_log = {
-        "id": len(exp.logs) + 1,
-        "status": "ERROR", 
-        "date": timestamp,
-        "cameras": [],
-        "info": f"Capture Failed: {error_msg}",
-        "files": []
-    }
+    exp.log_event(error_msg)
     
-    # Ensure the list exists before appending
-    if not hasattr(exp, 'logs'):
-        exp.logs = []
-    exp.logs.append(new_log)
-
-    # 2. Hard Fail the Status (Triggers your reboot handler)
-    exp.status = "ERROR"
-    exp.message = f"Job Failed at {timestamp}: {error_msg}"
-    exp.save()
+    if exp.status != "ERROR":
+        timestamp = datetime.now().strftime(Config.PRETTY_FORMAT)
+        exp.status = "ERROR"
+        exp.message = f"Job Failed at {timestamp}: {error_msg}"
+        exp.save()
 
     # 3. Update memory status
     scheduler_status.set_exp_status(event.job_id, "ERROR")
@@ -196,7 +184,6 @@ class ChiefOperator(object):
             if exp.expid not in running_jobs:
                 self.logger.info(f"Restoring job: {exp.expid}")
                 exp.log_event("Resync after reboot: Job restored to scheduler.")
-                exp.save()
                 self.schedule_job(exp.expid)
             else:
                 self.logger.info(f"Job {exp.expid} is already active.")
