@@ -76,7 +76,7 @@ class ExperimentList(object):
 
         for exp in self.exps:
             # Ignore inactive experiments
-            if exp.status in ['FINISHED', 'CANCEL', 'ERROR']:
+            if exp.status in ['FINISHED', 'CANCELLED']:
                 continue
             
             # Ignore self
@@ -89,3 +89,30 @@ class ExperimentList(object):
                 return exp
         
         return None
+    
+    @classmethod
+    def get_archived_history(cls):
+        """
+        Scans the working directory and returns cleanly formatted archived experiments.
+        Does not instantiate full Experiment objects for maximum performance.
+        """
+        directory = Config.WORKING_DIR
+        archived_data = {}
+        
+        if not os.path.exists(directory):
+            return archived_data
+
+        for folder_name in os.listdir(directory):
+            if folder_name.startswith('.'): 
+                continue
+            
+            full_path = os.path.join(directory, folder_name)
+            if not os.path.isdir(full_path):
+                continue
+
+            # Fetch the lightweight summary
+            summary = Experiment.get_archived_summary(folder_name)
+            if summary:
+                archived_data[folder_name] = summary
+                
+        return archived_data

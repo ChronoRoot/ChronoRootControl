@@ -6,24 +6,21 @@
 
 {% block content %}
 
-{# --- CHANGED: Logic definitions based on new rules --- #}
-
-{# Rule: SETUP and New forms are the only ones that can Launch/Start #}
+{# --- Logic definitions based on rules --- #}
 {% set is_setup = (exp.status == 'SETUP') or (actions == 'new') %}
+{% set is_terminal = exp.status in ['FINISHED', 'CANCELLED'] %}
+{% set is_errored = exp.status == 'ERROR' %}
+{% set is_modifiable = exp.status in ['NEW', 'SCHEDULED', 'RUNNING', 'ERROR'] %}
+{% set is_running = exp.status == 'RUNNING' %}
+{% set is_active_capture = exp.status in ['RUNNING', 'ERROR'] %}
+{% set capture_ok = archive_summary and archive_summary.all_ok %}
+{% set capture_partial = archive_summary and archive_summary.any_taken and not archive_summary.all_ok %}
+{% set capture_failed = archive_summary and not archive_summary.any_taken %}
 
-{# Rule: NEW and SCHEDULED can be modified (form enabled) #}
-{% set is_modifiable = exp.status in ['NEW', 'SCHEDULED'] %}
-
-{# Rule: Running state, including Errors during run #} 
-{% set is_running = exp.status == 'RUNNING' or exp.status == 'ERROR' %}
-
-{# Rule: Finished states (Allowed to delete) #}
-{% set is_finished = exp.status in ['FINISHED', 'CANCELLED'] %}
-
-{# Logic: Form is disabled unless it is Setup, New, or Scheduled #}
-{% set is_disabled = not (is_setup or is_modifiable) %}
-
-{# ----------------------------------------------------- #}
+{# Form locks #}
+{% set lock_all = not (is_setup or is_modifiable) %}
+{% set lock_start = is_active_capture or lock_all %}
+{% set lock_hardware = exp.expid != None %} 
 
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2">
@@ -36,9 +33,8 @@
     
     {% if exp.expid and actions != 'new' %}
     <div class="btn-toolbar mb-2 mb-md-0">
-        {# Rule: DIAGNOSTICS (and others) can view folder. This link remains active for all existing experiments. #}
-        <a href="{{ url_for('storage_page.browse', subpath=exp.expid) }}" class="btn btn-sm btn-outline-primary mr-2" target="_blank">
-            <i class="fas fa-folder-open"></i> Open Data
+        <a href="{{ url_for('storage_page.browse', subpath=exp.expid) }}" class="btn btn-sm btn-outline-primary mr-2"
+            <i class="fas fa-folder-open"></i> View Data
         </a>
         <a href="{{url_for('api_exp.get_experiment', expid=exp.expid) }}" class="btn btn-sm btn-outline-secondary">
             <i class="fas fa-code"></i> JSON
@@ -47,73 +43,269 @@
     {% endif %}
 </div>
 
-{% if exp.status %}
-    {% if exp.status == "FINISHED" %}
-        <div class="alert alert-success shadow-sm">
-            <h4 class="alert-heading"><i class="fas fa-check-circle"></i> Experiment Completed</h4>
-    {% elif exp.status == "CANCELLED" %}
-        <div class="alert alert-warning shadow-sm">
-            <h4 class="alert-heading"><i class="fas fa-ban"></i> Experiment Cancelled</h4>
-    {% elif exp.status == "ERROR" %}
-        <div class="alert alert-danger shadow-sm">
-            <h4 class="alert-heading"><i class="fas fa-exclamation-triangle fa-pulse"></i> Experiment Error</h4>
-    {% elif exp.status == "RUNNING" %}
-        <div class="alert alert-info shadow-sm">
-            <h4 class="alert-heading"><i class="fas fa-sync-alt fa-spin"></i> Experiment Running</h4>
-    {% else %}
-        <div class="alert alert-secondary shadow-sm">
-            <h4 class="alert-heading">{{ exp.status }}</h4>
-    {% endif %}
-            <p class="mb-0">{{ exp.message }}</p>
-            {% if exp.status in ['NEW', 'SCHEDULED', 'RUNNING'] %}
-                <hr>
-                <p class="mb-0"><strong>Next Image:</strong> {{ exp.next_run_time }}</p>
+<!-- ==========================================
+     UNIFIED EXPERIMENT DASHBOARD
+     ========================================== -->
+<div id="experiment-dashboard-panel">
+    <div class="card shadow-sm mb-4 border-{% if is_running %}info{% elif is_errored %}danger{% elif exp.status == 'CANCELLED' %}warning{% elif capture_failed %}danger{% elif capture_partial %}warning{% elif exp.status == 'FINISHED' %}success{% elif exp.status == 'SCHEDULED' %}warning{% else %}secondary{% endif %}">
+        
+        <!-- Dynamic Header -->
+        <div class="card-header d-flex justify-content-between align-items-center bg-{% if is_running or exp.status == 'DIAGNOSTICS' %}info text-white{% elif is_errored %}danger text-white{% elif exp.status == 'CANCELLED' %}warning text-dark{% elif capture_failed %}danger text-white{% elif capture_partial %}warning text-dark{% elif exp.status == 'FINISHED' %}success text-white{% elif exp.status == 'SCHEDULED' %}warning text-dark{% else %}light{% endif %}">
+            <h5 class="mb-0">
+                {% if is_running %}<i class="fas fa-sync-alt fa-spin mr-2"></i> Running
+                {% elif exp.status == 'DIAGNOSTICS' %}<i class="fas fa-microchip fa-pulse mr-2"></i> Diagnosing Hardware
+                {% elif exp.status == 'SCHEDULED' %}<i class="far fa-clock mr-2"></i> Scheduled
+                {% elif is_errored %}<i class="fas fa-exclamation-triangle fa-pulse mr-2"></i> Error
+                {% elif exp.status == 'CANCELLED' %}<i class="fas fa-ban mr-2"></i> Cancelled
+                {% elif capture_failed %}<i class="fas fa-exclamation-triangle mr-2"></i> Finished — No Data
+                {% elif capture_partial %}<i class="fas fa-exclamation-circle mr-2"></i> Finished — Issues
+                {% elif exp.status == 'FINISHED' %}<i class="fas fa-check-circle mr-2"></i> Finished
+                {% else %}<i class="fas fa-cog mr-2"></i> Setup
+                {% endif %}
+            </h5>
+            {% if exp.message %}
+                <span class="small font-weight-bold">{{ exp.message }}</span>
             {% endif %}
         </div>
-{% endif %}
 
-<div class="row mb-4">
-    <div class="col-md-6">
-        <div class="card bg-light border-secondary mb-3 h-100">
-            <div class="card-body d-flex align-items-center">
-                <div class="mr-3"><i class="far fa-clock fa-3x text-secondary"></i></div>
-                <div>
-                    <h6 class="card-subtitle text-muted mb-1">Current Server Time</h6>
-                    <h4 class="card-title mb-0" id="server-clock">Loading...</h4>
+        <div class="card-body bg-light">
+            
+            <!-- Row 1: Core System & Timeline Info -->
+            <div class="row mb-3">
+                <div class="col-md-3">
+                    <h6 class="text-muted text-uppercase small font-weight-bold">Server Time</h6>
+                    <span id="server-clock" class="h5">Loading...</span>
                 </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6">
-        <div class="card bg-light border-info mb-3 h-100">
-            <div class="card-body d-flex align-items-center">
-                <div class="mr-3"><i class="fas fa-hdd fa-3x text-info"></i></div>
-                <div>
-                    <h6 class="card-subtitle text-muted mb-1">Data Destination</h6>
-                    <h5 class="card-title mb-0 text-truncate" title="{{ config.WORKING_DIR }}">
-                        {{ config.WORKING_DIR }}
-                    </h5>
-                    {% if exp.expid %}
-                    <small class="text-muted">Full Path: {{ config.WORKING_DIR }}/{{ exp.expid }}</small>
+
+                <div class="col-md-5 border-left">
+                    <h6 class="text-muted text-uppercase small font-weight-bold">Data Destination</h6>
+                    <div class="text-truncate" title="{{ config.WORKING_DIR }}{% if exp.expid %}/{{ exp.expid }}{% endif %}">
+                        <strong>Path:</strong> {{ config.WORKING_DIR }}{% if exp.expid %}/{{ exp.expid }}{% endif %}
+                    </div>
+                    {% if storage %}
+                    <div class="small mt-1">
+                        <span class="{% if storage.percent_used > 90 %}text-danger font-weight-bold{% else %}text-muted{% endif %}">
+                            <i class="fas fa-hdd"></i> {{ storage.free_gb }} GB Free ({{ storage.percent_used }}% Used)
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="col-md-4 border-left">
+                    <h6 class="text-muted text-uppercase small font-weight-bold">Timeline</h6>
+                    {% if exp.status == 'DIAGNOSTICS' %}
+                        <div class="text-info font-weight-bold mt-1">
+                            <i class="fas fa-cogs fa-spin mr-1"></i> Continuous Scan Active
+                        </div>
+                    {% elif not is_terminal and job_ram and job_ram.next_run_time %}
+                        <div>
+                            <strong>Next Capture:</strong> 
+                            <span class="text-{% if is_errored %}danger{% else %}info{% endif %}" id="next-run-time-val" data-time="{{ job_ram.next_run_time }}">{{ job_ram.next_run_time }}</span>
+                            <span id="time-until-next" class="badge badge-{% if is_errored %}danger{% else %}info{% endif %} ml-1"></span>
+                        </div>
+                    {% elif exp.status == 'SCHEDULED' or exp.status == 'NEW' %}
+                        <div><strong>Starts:</strong> {{ exp.start.strftime('%Y-%m-%d %H:%M') if exp.start else 'Not set' }}</div>
+                    {% else %}
+                        <div class="text-muted font-italic">No upcoming actions</div>
                     {% endif %}
                 </div>
             </div>
+
+            {% if is_terminal %}
+            <hr>
+            <div class="row mb-3">
+                <div class="col-12 text-center py-4">
+                    {% if exp.expid == 'system' %}
+                    <h5 class="text-success mb-2">
+                        <i class="fas fa-flag-checkered mr-2"></i> Operation Concluded
+                    </h5>
+                    <p class="text-muted mb-0">The hardware diagnostic scan has finished. You can close this page.</p>
+                    {% elif exp.status == 'CANCELLED' %}
+                    <h5 class="text-warning mb-2">
+                        <i class="fas fa-ban mr-2"></i> Experiment Cancelled
+                    </h5>
+                    <p class="text-muted mb-2">Experiment was stopped before completion.</p>
+                    {% elif capture_ok %}
+                    <h5 class="text-success mb-2">
+                        <i class="fas fa-check-circle mr-2"></i> Experiment Finished Successfully
+                    </h5>
+                    <p class="text-muted mb-2">{{ exp.message }}</p>
+                    {% elif capture_partial %}
+                    <h5 class="text-warning mb-2">
+                        <i class="fas fa-exclamation-circle mr-2"></i> Experiment Finished With Issues
+                    </h5>
+                    <p class="text-muted mb-2">{{ exp.message }}</p>
+                    {% elif capture_failed %}
+                    <h5 class="text-danger mb-2">
+                        <i class="fas fa-exclamation-triangle mr-2"></i> Experiment Finished — No Pictures Captured
+                    </h5>
+                    <p class="text-muted mb-2">{{ exp.message }}</p>
+                    {% else %}
+                    <h5 class="text-success mb-2">
+                        <i class="fas fa-flag-checkered mr-2"></i> Operation Concluded
+                    </h5>
+                    <p class="text-muted mb-0">Data collection has finished.</p>
+                    {% endif %}
+
+                    {% if archive_summary and archive_summary.per_camera %}
+                    <div class="table-responsive mt-3 mx-auto" style="max-width: 420px;">
+                        <table class="table table-sm table-bordered bg-white mb-0">
+                            <thead class="thead-light">
+                                <tr>
+                                    <th>Camera</th>
+                                    <th>Taken</th>
+                                    <th>Expected</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for cam in archive_summary.cameras %}
+                                <tr>
+                                    <td>Cam {{ cam }}</td>
+                                    <td>{{ archive_summary.per_camera.get(cam|string, 0) }}</td>
+                                    <td>{{ archive_summary.expected_pictures }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% elif job_ram %}
+            <hr>
+            {% if is_errored %}
+            <div class="alert alert-danger py-2 small mb-3 border-danger">
+                <i class="fas fa-exclamation-circle mr-1"></i>
+                <strong>This experiment has encountered errors.</strong>
+                {% if exp.message %}
+                <div class="mt-1">{{ exp.message }}</div>
+                {% endif %}
+                {% if sys_info and sys_info.watchdog and sys_info.watchdog.reboots_last_6h > 0 %}
+                <div class="mt-1 text-muted font-weight-normal">
+                    System reboots in last 6 hours: {{ sys_info.watchdog.reboots_last_6h }} / {{ sys_info.watchdog.reboot_limit }}
+                </div>
+                {% endif %}
+                {% if sys_info and sys_info.watchdog and sys_info.watchdog.limit_reached %}
+                <div class="mt-1 text-warning font-weight-bold">Auto-reboot limit reached — manual intervention required.</div>
+                {% endif %}
+                {% if sys_info and sys_info.camera_gaps %}
+                    {% for gap in sys_info.camera_gaps %}
+                        {% if gap.expid == exp.expid %}
+                <div class="mt-1 small">Camera {{ gap.cam }} is {{ gap.behind_by }} pictures behind schedule.</div>
+                        {% endif %}
+                    {% endfor %}
+                {% endif %}
+            </div>
+            {% endif %}
+            <div class="row align-items-center mb-3">
+                <div class="col-md-7">
+                    <h6 class="text-muted text-uppercase small font-weight-bold">Live Progress</h6>
+                    
+                    {% if exp.status == 'DIAGNOSTICS' %}
+                        <div class="alert alert-info py-2 small text-center mb-0 border-info font-weight-bold text-dark mt-2">
+                            <i class="fas fa-microchip fa-pulse mr-1"></i> Interrogating Hardware Modules...
+                        </div>
+                    {% else %}
+                        {% set prog = job_ram.progress %}
+                        {% set percent = (prog.taken / prog.expected * 100) | round(1) if prog.expected > 0 else 0 %}
+                        
+                        <div class="d-flex justify-content-between mb-1 small">
+                            <strong>{{ prog.taken }} of {{ prog.expected }} images per camera taken</strong>
+                            <span>{{ percent }}%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar {% if is_running %}bg-info progress-bar-striped progress-bar-animated{% elif is_errored %}bg-danger progress-bar-striped progress-bar-animated{% else %}bg-secondary{% endif %}" role="progressbar" style="width: {{ percent }}%;"></div>
+                        </div>
+                        <div class="text-muted small mt-1">
+                            Expected up to now: <strong>{{ prog.expected_so_far }}</strong>
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="col-md-5 border-left">
+                    <h6 class="text-muted text-uppercase small font-weight-bold">Last Capture Status</h6>
+                    {% if job_ram.last_capture %}
+                        {% if job_ram.last_capture.result == 'SUCCESS' %}
+                            <span class="text-success font-weight-bold"><i class="fas fa-check-circle"></i> SUCCESS</span>
+                        {% else %}
+                            <span class="text-danger font-weight-bold"><i class="fas fa-times-circle"></i> FAIL</span>
+                        {% endif %}
+                        <div class="small text-muted">{{ job_ram.last_capture.time }}</div>
+                    {% else %}
+                        <span class="text-muted font-italic small">Waiting for first capture...</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Row 3: Quick Image Links -->
+            {% if exp.expid and not is_setup and exp.cameras %}
+            <hr>
+            <div class="row">
+                <div class="col-12">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="text-muted text-uppercase small font-weight-bold mb-0">Latest Camera Images</h6>
+                        <small class="text-muted font-italic">Press 'View Data' above to browse all pictures.</small>
+                    </div>
+                    <div class="d-flex flex-wrap">
+                        {% for cam in exp.cameras %}
+                            {% set img_path = last_images.get(cam|int) if last_images else None %}
+                            <div class="mr-2 mb-2">
+                                <span class="badge badge-light border py-2 px-3 shadow-sm">
+                                    <i class="fas fa-video text-secondary mr-1"></i> Cam {{ cam }}
+                                    {% if img_path %}
+                                        <a href="{{ url_for('api_exp.get_system_image', filename=img_path) }}" target="_blank" class="ml-2 btn btn-xs btn-outline-info py-0 px-2" style="font-size: 0.75rem;">
+                                            <i class="far fa-image mr-1"></i> View
+                                        </a>
+                                    {% else %}
+                                        <span class="ml-2 text-muted small font-italic">No image yet</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
-<form action="" method="post" name="settings">
+<!-- ==========================================
+        EXPERIMENT CONFIGURATION FORM
+     ========================================== -->
+
+<form action="" method="post" name="settings" id="exp-form">
     {{ form.hidden_tag() }}
 
     <div class="row">
         <div class="col-lg-8">
             
+            {% if is_modifiable and not is_setup %}
+            <div class="alert alert-warning small">
+                <i class="fas fa-info-circle mr-1"></i> <strong>Modification Rules:</strong> To protect data integrity, Hardware settings (Cameras/Interval) cannot be changed once an experiment is created. If currently running, the Start time is locked. You may extend or shorten the End time.
+            </div>
+            {% endif %}
+
             <div class="card shadow-sm mb-4">
                 <div class="card-header bg-white"><h5 class="mb-0"><i class="fas fa-info-circle mr-2"></i>General Info</h5></div>
                 <div class="card-body">
                     <div class="form-group">
-                        <label for="description"><strong>Description</strong></label>
-                        {{ form.desc(class="form-control", placeholder="Enter description...", disabled=is_disabled) }}
+                        <label for="name"><strong>Experiment Name (Short)</strong></label>
+                        {% if exp.expid %}
+                            {{ form.name(class="form-control bg-light", readonly=True) }}
+                            <small class="form-text text-muted">Name cannot be changed after creation.</small>
+                        {% else %}
+                            {{ form.name(class="form-control", placeholder="Max 16 chars (e.g. Test_1). Do not use spaces or special characters.", maxlength="16", disabled=lock_all) }}
+                        {% endif %}
+                        {% for error in form.name.errors %}
+                            <div class="alert alert-danger mt-2 py-1 px-2 small">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-group">
+                        <label for="description"><strong>Description (Optional Details)</strong></label>
+                        {{ form.desc(class="form-control", placeholder="Enter full description...", disabled=lock_all) }}
                     </div>
                 </div>
             </div>
@@ -126,12 +318,14 @@
                             <div class="form-group">
                                 <label><strong>Start Time</strong></label>
                                 <div class="input-group date" id="datetimepicker1" data-target-input="nearest">
-                                    {{ form.start(class="form-control datetimepicker-input", **{'data-target': '#datetimepicker1', 'disabled': is_disabled}) }}
-                                    <div class="input-group-append" data-target="#datetimepicker1" data-toggle="datetimepicker">
-                                        <div class="input-group-text {% if is_disabled %}bg-light{% endif %}"><i class="far fa-calendar"></i></div>
+                                    {{ form.start(class="form-control datetimepicker-input calc-trigger", **{'data-target': '#datetimepicker1', 'readonly': lock_start}) }}
+                                    <div class="input-group-append" data-target="#datetimepicker1" {% if not lock_start %}data-toggle="datetimepicker"{% endif %}>
+                                        <div class="input-group-text {% if lock_start %}bg-light{% endif %}"><i class="far fa-calendar"></i></div>
                                     </div>
                                 </div>
-                                {% if not is_disabled %}<small class="form-text text-muted">Must be +1 min from now.</small>{% endif %}
+                                {% if lock_start and is_active_capture %}
+                                    <small class="form-text text-warning"><i class="fas fa-lock"></i> Locked (Experiment active)</small>
+                                {% endif %}
                                 {% for error in form.start.errors %}
                                     <div class="alert alert-danger mt-2 py-1 px-2 small">{{ error }}</div>
                                 {% endfor %}
@@ -142,12 +336,11 @@
                             <div class="form-group">
                                 <label><strong>End Time</strong></label>
                                 <div class="input-group date" id="datetimepicker2" data-target-input="nearest">
-                                    {{ form.end(class="form-control datetimepicker-input", **{'data-target': '#datetimepicker2', 'disabled': is_disabled}) }}
-                                    <div class="input-group-append" data-target="#datetimepicker2" data-toggle="datetimepicker">
-                                        <div class="input-group-text {% if is_disabled %}bg-light{% endif %}"><i class="far fa-calendar"></i></div>
+                                    {{ form.end(class="form-control datetimepicker-input calc-trigger", **{'data-target': '#datetimepicker2', 'readonly': lock_all}) }}
+                                    <div class="input-group-append" data-target="#datetimepicker2" {% if not lock_all %}data-toggle="datetimepicker"{% endif %}>
+                                        <div class="input-group-text {% if lock_all %}bg-light{% endif %}"><i class="far fa-calendar"></i></div>
                                     </div>
                                 </div>
-                                {% if not is_disabled %}<small class="form-text text-muted">Duration > 10 mins.</small>{% endif %}
                                 {% for error in form.end.errors %}
                                     <div class="alert alert-danger mt-2 py-1 px-2 small">{{ error }}</div>
                                 {% endfor %}
@@ -160,9 +353,10 @@
                             <div class="form-group">
                                 <label><strong>Interval (Minutes)</strong></label>
                                 <div class="input-group">
-                                    {{ form.interval(class="form-control", type="number", disabled=is_disabled) }}
+                                    {{ form.interval(class="form-control calc-trigger", type="number", readonly=lock_hardware) }}
                                     <div class="input-group-append"><span class="input-group-text">min</span></div>
                                 </div>
+                                {% if lock_hardware %}<small class="form-text text-muted"><i class="fas fa-lock"></i> Locked</small>{% endif %}
                                 {% for error in form.interval.errors %}
                                     <div class="alert alert-danger mt-2 py-1 px-2 small">{{ error }}</div>
                                 {% endfor %}
@@ -179,7 +373,10 @@
                         <div class="col-md-6">
                              <div class="form-group">
                                 <label><strong>Select Cameras</strong></label>
-                                {{ form.cameras(class="form-control", style="height: 120px;", disabled=is_disabled) }}
+                                <div class="calc-trigger-cams">
+                                    {{ form.cameras(class="form-control", style="height: 120px;", readonly=lock_hardware, style="pointer-events: " ~ ('none' if lock_hardware else 'auto') ~ ";") }}
+                                </div>
+                                {% if lock_hardware %}<small class="form-text text-muted"><i class="fas fa-lock"></i> Locked</small>{% endif %}
                                 {% for error in form.cameras.errors %}
                                     <div class="alert alert-danger mt-2 py-1 px-2 small">{{ error }}</div>
                                 {% endfor %}
@@ -188,7 +385,7 @@
                         <div class="col-md-6">
                             <label><strong>Lighting</strong></label>
                             <div class="custom-control custom-checkbox mt-2">
-                                {{ form.ir(class="custom-control-input", disabled=is_disabled) }}
+                                {{ form.ir(class="custom-control-input", disabled=lock_all) }}
                                 <label class="custom-control-label" for="ir">Enable IR Backlight</label>
                             </div>
                         </div>
@@ -198,19 +395,36 @@
         </div>
 
         <div class="col-lg-4">
-            <div class="card shadow-sm sticky-top" style="top: 80px;">
+            
+            <!-- NEW: Real-time Projection Card -->
+            <div class="card shadow-sm mb-4 border-info">
+                <div class="card-header bg-info text-white py-2">
+                    <h6 class="mb-0"><i class="fas fa-calculator mr-2"></i>Estimator</h6>
+                </div>
+                <div class="card-body bg-light">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-muted">Total Pictures:</span>
+                        <strong id="est-pics" class="text-dark">--</strong>
+                    </div>
+                    <div class="d-flex justify-content-between border-top pt-2">
+                        <span class="text-muted">Storage Required:</span>
+                        <strong id="est-size" class="text-info">-- GB</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons Card -->
+            <div class="card shadow-sm sticky-top" style="top: 80px;" id="action-buttons-panel">
                 <div class="card-header bg-light">
                     <h5 class="mb-0">Actions</h5>
                 </div>
                 <div class="card-body d-flex flex-column">
                     
                     {% if exp.expid and actions != "new" %}
-                    <a href="{{ url_for('storage_page.browse', subpath=exp.expid) }}" target="_blank" class="btn btn-outline-primary btn-block mb-3">
+                    <a href="{{ url_for('storage_page.browse', subpath=exp.expid) }}" class="btn btn-outline-primary btn-block mb-3">
                         <i class="fas fa-folder-open mr-2"></i> View Data
                     </a>
                     {% endif %}
-                    
-                    {# --- CHANGED: Action Buttons Logic --- #}
 
                     {# 1. SETUP: Can Launch #}
                     {% if is_setup %}
@@ -218,40 +432,34 @@
                             <i class="fas fa-play-circle mr-2"></i> Start / Launch
                         </button>
 
-                    {# 2. RUNNING: Can Stop (Cancel) only #}
-                    {% elif is_running %}
-                        <div class="alert alert-info small text-center">Experiment in progress</div>
+                    {# 2. RUNNING & ERROR: Save (End time only), Stop #}
+                    {% elif is_active_capture %}
+                        <button type="submit" name="action" value="save" class="btn btn-primary btn-block mb-3">
+                            <i class="fas fa-save mr-2"></i> Save Changes
+                        </button>
                         <button type="submit" name="action" value="cancel" class="btn btn-warning btn-block btn-lg">
-                            <i class="fas fa-stop-circle mr-2"></i> Stop
+                            <i class="fas fa-stop-circle mr-2"></i> Stop Early
                         </button>
 
-                    {# 3. NEW & SCHEDULED: Can Modify, Save, Cancel, and Delete #}
+                    {# 3. NEW & SCHEDULED: Modify, Save, Cancel, Delete #}
                     {% elif is_modifiable %}
                         <button type="submit" name="action" value="save" class="btn btn-primary btn-block mb-3">
                             <i class="fas fa-save mr-2"></i> Save Changes
                         </button>
-
                         <button type="submit" name="action" value="cancel" class="btn btn-warning btn-block mb-2">
                             <i class="fas fa-ban mr-2"></i> Cancel
                         </button>
-                        
-                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" onclick="return confirm('Permanently delete this experiment?')">
+                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" 
+                                onclick="confirmSubmit(event, this, 'Delete Experiment', 'Permanently delete this experiment?', true)">
                             <i class="fas fa-trash-alt mr-2"></i> Delete
                         </button>
 
                     {# 4. FINISHED & CANCELLED: Can Delete #}
-                    {% elif is_finished %}
-                        <div class="alert alert-secondary text-center mb-3">
-                             {{ exp.status }}
-                        </div>
-                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" onclick="return confirm('Permanently delete this experiment and files?')">
+                    {% elif is_terminal %}
+                        <button type="submit" name="action" value="delete" class="btn btn-danger btn-block" 
+                                onclick="confirmSubmit(event, this, 'Delete Experiment', 'Permanently delete this experiment and all data files?', true)">
                             <i class="fas fa-trash-alt mr-2"></i> Delete Experiment
                         </button>
-
-                    {# 5. DIAGNOSTICS: View folder only (handled above), no buttons here #}
-                    {% elif exp.status == 'DIAGNOSTIC' %}
-                        <div class="alert alert-secondary text-center">Diagnostics (Read Only)</div>
-                    
                     {% endif %}
 
                 </div>
@@ -278,7 +486,6 @@
                         </tr>
                     </thead>
                     <tbody>
-                        {# Iterate through logs in reverse order (newest first) #}
                         {% for log in exp.logs|reverse %}
                         <tr>
                             <td>{{ log.id }}</td>
@@ -298,31 +505,160 @@
 
 {% block footer %}
 <script type="text/javascript">
-    let remoteTime = new Date("{{ now }}").getTime(); 
+    // Parse the server time safely for all browsers
+    let serverTimeStr = "{{ now }}".replace(" ", "T");
+    let remoteTime = new Date(serverTimeStr).getTime(); 
+    if (isNaN(remoteTime)) { remoteTime = Date.now(); }
 
     function updateServerClock() {
         remoteTime += 1000;
-        
         const displayDate = new Date(remoteTime);
         const timeOptions = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
         
-        document.getElementById('server-clock').innerText = 
-            displayDate.toLocaleDateString() + " " + displayDate.toLocaleTimeString([], timeOptions);
+        let clockElem = document.getElementById('server-clock');
+        if (clockElem) {
+            clockElem.innerText = displayDate.toLocaleDateString() + " " + displayDate.toLocaleTimeString([], timeOptions);
+        }
+
+        let nextRunElem = document.getElementById('next-run-time-val');
+        let countdownSpan = document.getElementById('time-until-next');
+        
+        if (nextRunElem && countdownSpan) {
+            let nextRunStr = nextRunElem.getAttribute('data-time');
+            
+            if (nextRunStr && nextRunStr !== "None" && nextRunStr !== "") {
+                let safeStr = nextRunStr.replace(" ", "T");
+                let nextTime = new Date(safeStr).getTime();
+                
+                if (!isNaN(nextTime)) {
+                    let diff = nextTime - remoteTime;
+                    
+                    if (diff > 0) {
+                        let mins = Math.floor(diff / 60000);
+                        let secs = Math.floor((diff % 60000) / 1000);
+                        countdownSpan.innerText = "(in " + mins + "m " + secs + "s)";
+                    } else {
+                        countdownSpan.innerText = "(taking picture...)";
+                    }
+                }
+            } else {
+                countdownSpan.innerText = "";
+            }
+        }
     }
 
     setInterval(updateServerClock, 1000);
     updateServerClock();
 
-    {% if not is_disabled %}
+    function calculateEstimates() {
+        let startVal = $('#start').val();
+        let endVal = $('#end').val();
+        let intervalVal = parseInt($('#interval').val());
+        let numCams = $('#cameras option:selected').length;
+        
+        if(!startVal || !endVal || !intervalVal || numCams === 0) {
+            $('#est-pics').text('--');
+            $('#est-size').html('-- GB');
+            return;
+        }
+        
+        let sDate = new Date(startVal.replace(" ", "T"));
+        let eDate = new Date(endVal.replace(" ", "T"));
+        let diffMins = (eDate - sDate) / 60000;
+        
+        if (diffMins > 0 && intervalVal >= 5) {
+            let picsPerCam = Math.floor(diffMins / intervalVal) + 1;
+            let totalPics = picsPerCam * numCams;
+            let totalGb = (totalPics * 4) / 1024;
+            
+            $('#est-pics').text(totalPics.toLocaleString());
+            $('#est-size').text(totalGb.toFixed(2) + " GB");
+        } else {
+            $('#est-pics').text('0');
+            $('#est-size').text('0.00 GB');
+        }
+    }
+
+    {% if not lock_all %}
     $(function () {
         $.fn.datetimepicker.Constructor.Default = $.extend({}, $.fn.datetimepicker.Constructor.Default, {
             icons: { time: 'far fa-clock', date: 'far fa-calendar', up: 'fas fa-arrow-up', down: 'fas fa-arrow-down', previous: 'fas fa-chevron-left', next: 'fas fa-chevron-right', today: 'fas fa-calendar-check', clear: 'fas fa-trash', close: 'fas fa-times' }
         });
-        $('#datetimepicker1').datetimepicker({ format: 'YYYY-MM-DD HH:mm:ss ZZ', sideBySide: true });
-        $('#datetimepicker2').datetimepicker({ useCurrent: false, format: 'YYYY-MM-DD HH:mm:ss ZZ', sideBySide: true });
-        $("#datetimepicker1").on("change.datetimepicker", function (e) { $('#datetimepicker2').datetimepicker('minDate', e.date); });
-        $("#datetimepicker2").on("change.datetimepicker", function (e) { $('#datetimepicker1').datetimepicker('maxDate', e.date); });
+        $('#datetimepicker1').datetimepicker({ format: 'YYYY-MM-DD HH:mm:ss', sideBySide: true, ignoreReadonly: true });
+        $('#datetimepicker2').datetimepicker({ useCurrent: false, format: 'YYYY-MM-DD HH:mm:ss', sideBySide: true, ignoreReadonly: true });
+        
+        {% if not lock_start %}
+        $("#datetimepicker1").on("change.datetimepicker", function (e) { 
+            $('#datetimepicker2').datetimepicker('minDate', e.date); 
+            calculateEstimates();
+        });
+        {% endif %}
+        
+        $("#datetimepicker2").on("change.datetimepicker", function (e) { 
+            {% if not lock_start %}$('#datetimepicker1').datetimepicker('maxDate', e.date);{% endif %}
+            calculateEstimates();
+        });
+
+        $('.calc-trigger').on('input change', calculateEstimates);
+        $('#cameras').on('change', calculateEstimates);
+        
+        calculateEstimates();
     });
+    {% else %}
+    $(function() { calculateEstimates(); });
     {% endif %}
+    
+    $('#exp-form').on('submit', function() {
+        try {
+            $('input, select').prop('disabled', false);
+            
+            // Capture the button value before disabling
+            var btn = $(document.activeElement);
+            if (btn.is('button[type="submit"]')) {
+                $('<input>').attr({type: 'hidden', name: btn.attr('name'), value: btn.attr('value')}).appendTo(this);
+            }
+            
+            // Instantly disable to block the double-launch bug
+            $(this).find('button[type="submit"]').prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-2"></i> Working...');
+        } catch(e) {}
+    });
+
+    // ==============================================================
+    // DYNAMIC AUTO-REFRESH (Updates Dashboard & Action Buttons)
+    // ==============================================================
+    function startDashboardAutoRefresh() {
+        setInterval(function() {
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            fetch(window.location.href)
+                .then(response => response.text())
+                .then(html => {
+                    var parser = new DOMParser();
+                    var doc = parser.parseFromString(html, "text/html");
+                    
+                    // 1. Refresh the top dashboard
+                    if(doc.getElementById('experiment-dashboard-panel')) {
+                        $('#experiment-dashboard-panel').html(doc.getElementById('experiment-dashboard-panel').innerHTML);
+                    }
+                    
+                    // 2. Refresh the Action buttons so they change if the experiment finishes
+                    if(doc.getElementById('action-buttons-panel')) {
+                        $('#action-buttons-panel').html(doc.getElementById('action-buttons-panel').innerHTML);
+                    }
+                    
+                    // 3. INSTANTLY re-apply the clock and countdown so it never flickers to "Loading..."
+                    remoteTime -= 1000; 
+                    updateServerClock();
+                    
+                })
+                .catch(err => console.warn('Background refresh failed', err));
+        }, 5000); 
+    }
+    
+    $(document).ready(function() {
+        startDashboardAutoRefresh();
+    });
 </script>
 {% endblock %}

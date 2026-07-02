@@ -2,15 +2,15 @@
 Management of an experiment
 """
 import os
+from datetime import datetime
+
+from flask import Blueprint, abort, flash, render_template, request, url_for, redirect
+from wtforms import SelectMultipleField
 
 from app.experiment.form import SettingsForm
 from app.experiment.models import Experiment
-from .models import Experiment
+from app.options.schedulerstatus import SchedulerStatus
 from config import Config
-from flask import (Blueprint, abort, flash, render_template, request,
-                   url_for)
-from wtforms import SelectMultipleField, TextAreaField
-from datetime import datetime
 
 experiment_page = Blueprint('experiment_page', __name__,
                             template_folder='templates',
@@ -28,27 +28,31 @@ def new_experiment():
                                             description=name)
             setattr(form, name, tmpfield)
 
-
-    # Create a BLANK experiment. It has no ID yet.
     exp = Experiment() 
     actions = "new"
+    
+    # --- NEW: Fetch Storage info for the top dashboard ---
+    status_manager = SchedulerStatus()
+    storage_info = status_manager.get_info().get("system_health", {}).get("storage", {})
 
     if form.validate_on_submit():
-        if form.validate_overlap():
-            # Populate the blank object
-            form.populate_obj(exp)
+        form.populate_obj(exp)
+        
+        is_valid, error_msg = exp.validate_rules(is_new=True)
+        
+        if not is_valid:
+            flash(f'Cannot launch: {error_msg}', 'danger')
+        elif not form.validate_overlap():
+            flash('Scheduling conflict with an existing experiment.', 'danger')
+        else:
             exp.status = "NEW"
-            # This triggers generate_id() -> creates folder -> saves json -> notifies scheduler
             exp.create() 
-            
             flash('Launched! ID: %s' % exp.expid, 'success')
             target_url = url_for('experiment_page.setuped_experiment', expid=exp.expid)
-            return f"<script>window.location.href = '{target_url}';</script>"
-        else:
-             flash('Scheduling conflict.', 'danger')
+            return redirect(target_url)
 
     return render_template('experiment.html', form=form, exp=exp, config=Config, 
-                           actions=actions, now=datetime.now().strftime(Config.PRETTY_FORMAT))
+                           actions=actions, storage=storage_info, now=datetime.now().strftime(Config.PRETTY_FORMAT))
 
 @experiment_page.route('/<expid>', methods=['GET', 'POST'])
 def setuped_experiment(expid):   
@@ -58,45 +62,85 @@ def setuped_experiment(expid):
         abort(404)
         
     form = SettingsForm(obj=exp)
+    
+    # --- NEW: Fetch RAM State & Storage ---
+    status_manager = SchedulerStatus()
+    sys_info = status_manager.get_info()
+    job_ram = status_manager.state.get("jobs", {}).get(exp.expid, None)
+    if exp.status in ("FINISHED", "CANCELLED"):
+        job_ram = None
+    archive_summary = None
+    if exp.status in ("FINISHED", "CANCELLED") and exp.expid:
+        archive_summary = Experiment.get_archived_summary(exp.expid)
+    storage_info = sys_info.get("system_health", {}).get("storage", {})
+    sys_alerts = sys_info.get("alerts", {})
 
-    # 1. Determine permissions based on Status
-    if exp.status in ["NEW", "SCHEDULED"]:
+    # --- NEW: Find the exact latest image filename for each camera ---
+    last_images = {}
+    if os.path.exists(exp.workdir) and exp.cameras:
+        for cam in exp.cameras:
+            cam_dir = os.path.join(exp.workdir, str(cam))
+            if os.path.exists(cam_dir):
+                # Fast read-only check
+                files = [f for f in os.listdir(cam_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+                if files:
+                    latest_file = max(files, key=lambda x: os.path.getmtime(os.path.join(cam_dir, x)))
+                    last_images[cam] = f"{exp.expid}/{cam}/{latest_file}"
+
+    # Determine permissions based on Status
+    if exp.status in ["NEW", "SCHEDULED", "RUNNING", "ERROR"]:
         actions = "editable"
     elif exp.status == "SETUP":
         actions = "new"
-    elif exp.status == "RUNNING" or "ERROR":
-        actions = "cancelable"
     else:
         actions = "readonly"
 
     if request.method == 'POST':
         action = request.form['action']
 
-        # 2. Handle SAVE (Only if allowed)
         if action == "save" and actions == "editable":
             if form.validate_on_submit():
-                # Optional: You might want to run form.validate_overlap() here too
+                orig_name = exp.name 
+                orig_interval = exp.interval
+                orig_cameras = exp.cameras
+                orig_start = exp._start
+                
                 form.populate_obj(exp)
-                exp.create() # Saves changes to JSON
-                flash('Changes saved successfully.', 'success')
-                # Reload to show new values
-                target_url = url_for('experiment_page.setuped_experiment', expid=exp.expid)
-                return f"<script>window.location.href = '{target_url}';</script>"
+                
+                exp.name = orig_name 
+                exp.interval = orig_interval
+                exp.cameras = orig_cameras
+                if exp.status in ("RUNNING", "ERROR"):
+                    exp._start = orig_start
+                
+                is_valid, error_msg = exp.validate_rules(is_new=False)
+                
+                if not is_valid:
+                    flash(f'Cannot save: {error_msg}', 'danger')
+                elif not form.validate_overlap(current_exp_id=exp.expid):
+                    flash('Scheduling conflict with an existing experiment.', 'danger')
+                else:
+                    exp.update() 
+                    flash('Changes saved successfully.', 'success')
+                    target_url = url_for('experiment_page.setuped_experiment', expid=exp.expid)
+                    return redirect(target_url)
             else:
                 flash('Error saving changes. Check the form.', 'danger')
 
-        # 3. Handle CANCEL
-        elif action == "cancel" and actions in ["editable", "cancelable"]:
+        elif action == "cancel":
             exp.cancel()
             flash('The experiment %s has been canceled' % exp.expid, 'warning')
             target_url = url_for('experiment_page.setuped_experiment', expid=exp.expid)
-            return f"<script>window.location.href = '{target_url}';</script>"
+            return redirect(target_url)
 
-        # 4. Handle DELETE
         elif action == "delete":
+            exp.cancel() 
             exp.delete()
             flash('The experiment %s has been deleted' % exp.expid, 'danger')
             return "<script>window.location.href = '/';</script>"
 
     return render_template('experiment.html', form=form, exp=exp, config=Config,
-                           actions=actions, now=datetime.now().strftime(Config.PRETTY_FORMAT))
+                           actions=actions, job_ram=job_ram, archive_summary=archive_summary,
+                           storage=storage_info, last_images=last_images,
+                           sys_alerts=sys_alerts, sys_info=sys_info,
+                           now=datetime.now().strftime(Config.PRETTY_FORMAT))

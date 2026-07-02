@@ -1,7 +1,7 @@
 <!-- Fixed navbar -->
 <nav class="navbar navbar-expand-md navbar-dark fixed-top bg-dark">
     <div class="container">
-        <a class="navbar-brand" href="/">{{ config.SITE_NAME }}</a>
+        <a class="navbar-brand" href="/">{{ config.SITE_NAME | default('ChronoRootControl') }}</a>
         <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarCollapse" aria-controls="navbarCollapse" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -13,23 +13,28 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{ url_for('storage_page.index') }}">
-                        <i class="fas fa-hdd"></i> Disks and Files
-                    </a>
-                </li>
-                <li class="nav-item">
                     <a class="nav-link" href="{{url_for('config_page.conf')}}"> 
                         <i class="fas fa-cogs"></i> Configure 
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('help_page.help')}}">
-                        <i class="fas fa-question-circle"></i> Help
+                    <a class="nav-link" href="{{ url_for('storage_page.index') }}">
+                        <i class="fas fa-hdd"></i> Disks and Files
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{url_for('help_page.help', page='about')}}">
-                        <i class="fas fa-info-circle"></i> About
+                    <a class="nav-link" href="{{ url_for('wifi_page.index') }}"> 
+                        <i class="fas fa-wifi"></i> Network 
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('sync_page.index') }}">
+                        <i class="fas fa-cloud-upload-alt"></i> Data Sync
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{url_for('help_page.index')}}">
+                        <i class="fas fa-question-circle"></i> Documentation
                     </a>
                 </li>
             </ul>

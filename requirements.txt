@@ -1,41 +1,28 @@
-# Core Flask Framework
-Flask==1.1.1
-Flask-WTF==0.14.2
-WTForms==2.2.1
-Jinja2==2.10.3
-Werkzeug==0.16.0
-itsdangerous==0.24
-MarkupSafe==0.23
-click==6.7
-blinker==1.4
+# Core Framework
+Flask
+Flask-WTF
+WTForms
+Jinja2
+Werkzeug
+itsdangerous
+MarkupSafe
+click
+blinker
 
-# WSGI Server
-uWSGI
+# Scheduling & Time
+APScheduler
+arrow
+pytz
+python-dateutil
+tzlocal
+six
 
-# Scheduling and Time Handling
-APScheduler==3.6.3
-arrow==0.15.4
-pytz==2016.10
-python-dateutil==2.6.0
-tzlocal==1.5.1
-six==1.10.0
-
-# Hardware Control (Raspberry Pi)
-picamera==1.13
-RPi.GPIO==0.7.0
-smbus2==0.2.0
-
-# Image Processing
-Pillow==11.2.1
-
-# File Operations
-filelock==3.0.4
-
-# Documentation
-markdown==3.3.7
-
-# System Utilities
-appdirs==1.4.0
-packaging==16.8
-pyparsing==2.1.10
-pbr==1.10.0
+# Hardware & System Utils
+smbus2
+Pillow
+filelock
+markdown
+appdirs
+packaging
+pyparsing
+pbr

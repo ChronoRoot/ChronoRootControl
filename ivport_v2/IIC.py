@@ -58,6 +58,5 @@ class IIC():
     def read_control_register(self):
         return self._read()
 
-
     def write_control_register(self, config):
         self._write(iic_register, config)

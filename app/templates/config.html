@@ -7,253 +7,551 @@
 
 <h1 class="mt-5 mb-4">Device Configuration</h1>
 
-<div class="row">
-    <div class="col-lg-6">
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light">
-                <h5 class="mb-0"><i class="fas fa-microchip mr-2"></i>Hardware Diagnostics</h5>
-            </div>
-            <div class="card-body">
-                <p class="card-text">Scan multiplexer ports to verify connectivity.</p>
-                
-                {% set lock = scheduler_info.lock_info %}
+<!-- ==========================================
+     DYNAMIC ALERTS PANEL
+     ========================================== -->
+<div id="alerts-panel" data-live-update="alerts-panel">
+    {% if scheduler_info.alerts.has_warnings %}
+        <div class="alert alert-danger shadow-sm border-left-strong" role="alert">
+            <h4 class="alert-heading"><i class="fas fa-exclamation-triangle mr-2"></i>System Anomalies Detected</h4>
+            <ul class="mb-0">
+                {% for issue in scheduler_info.alerts.issues %}
+                    <li>{{ issue }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
 
-                {# Scenario 1: Diagnostics are CURRENTLY running #}
-                {% if lock.status == 'LOCKED' and lock.owner == 'System' %}
-                    
-                    <div class="alert alert-info mb-0" role="alert">
-                        <div class="d-flex align-items-center">
-                            <i class="fas fa-spinner fa-spin fa-2x mr-3"></i>
-                            <div>
-                                <h6 class="alert-heading mb-0">Diagnostics in Progress</h6>
-                                <small>Please wait while the system checks cameras...</small>
-                            </div>
-                        </div>
-                        <div class="mt-2">
-                            <button disabled class="btn btn-info btn-block disabled">
-                                <i class="fas fa-sync-alt fa-spin mr-2"></i> Scanning...
-                            </button>
-                        </div>
-                    </div>
+    {% if scheduler_info.next_picture and scheduler_info.next_picture != 'None' %}
+    <div class="alert alert-info shadow-sm d-flex justify-content-between align-items-center mb-4" role="alert">
+        <div>
+            <i class="far fa-calendar-check mr-2"></i> 
+            <strong class="mr-2">Next Capture:</strong> 
+            
+            <span class="d-inline-flex align-items-center bg-white border rounded px-2 py-1 shadow-sm">
+                <span class="text-dark font-weight-bold mx-1">{{ scheduler_info.next_picture }}</span>
+                <span class="border-left mx-2" style="height: 16px;"></span>
+                <span class="badge badge-pill badge-success countdown-badge" data-target-time="{{ scheduler_info.next_picture }}">
+                    <i class="fas fa-stopwatch mr-1"></i> <span class="countdown-text">...</span>
+                </span>
+            </span>
+        </div>
+        {% if scheduler_info.alerts.picture_overdue %}
+            <span class="badge badge-danger px-3 py-2"><i class="fas fa-clock mr-1"></i> OVERDUE</span>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
 
-                {# Scenario 2: Locked by someone else (User focusing or Experiment running) #}
-                {% elif lock.status in ['LOCKED', 'REQUESTING'] %}
-                
-                    <div class="alert alert-warning mb-0" role="alert">
-                        <div class="d-flex align-items-center mb-2">
-                            <i class="fas fa-lock fa-2x mr-3"></i>
-                            <div>
-                                <h6 class="alert-heading mb-0">Hardware Unavailable</h6>
-                                <small>Locked by: <strong>{{ lock.owner }}</strong></small>
-                            </div>
-                        </div>
-                        
-                        {% if lock.details %}
-                        <small class="d-block text-muted mb-2">({{ lock.details }})</small>
-                        {% endif %}
-
-                        <button disabled class="btn btn-outline-secondary btn-block disabled" style="cursor: not-allowed; opacity: 0.6;">
-                            <i class="fas fa-ban mr-2"></i> Scan Disabled
-                        </button>
-                    </div>
-
-                {# Scenario 3: Free to use #}
+<!-- ==========================================
+     GLOBAL STATUS PANEL
+     ========================================== -->
+<div class="card mb-4 shadow-sm border-secondary" id="global-status-panel">
+    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fas fa-server mr-2"></i>System Status</h5>
+        
+        <!-- Prominent Hardware Lock Status -->
+        {% set lock = scheduler_info.lock_info %}
+        <div data-live-update="global-hardware-lock">
+            <span class="mr-2">Hardware Lock:</span>
+            {% if lock.status == 'FREE' %}
+                <span class="badge badge-success px-2 py-1">FREE</span>
+            {% else %}
+                <span class="badge {% if scheduler_info.alerts.lock_stuck %}badge-danger animate-pulse{% else %}badge-warning{% endif %} px-2 py-1">
+                    <i class="fas fa-lock mr-1"></i> {{ lock.status }} ({{ lock.owner }})
+                </span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-body bg-light py-3">
+        <!-- Row 1: Scheduler & Jobs -->
+        <div class="row small mb-2 pb-2 border-bottom">
+            <div class="col-md-4">
+                <strong>Scheduler:</strong> 
+                {% if scheduler_info.status == 'running' %}
+                    <span class="text-success"><i class="fas fa-check-circle"></i> Running</span>
                 {% else %}
-
-                    <form id="diagnosticForm">
-                        <button type="button" onclick="runDiagnostic()" class="btn btn-warning btn-block">
-                            <i class="fas fa-stethoscope"></i> Run Hardware Scan
-                        </button>
-                    </form>
-                    <div id="scanStatus" class="mt-3 text-center text-muted" style="display:none;">
-                        <small><i class="fas fa-spinner fa-spin mr-1"></i> Starting probe...</small>
-                    </div>
-
+                    <span class="text-danger"><i class="fas fa-stop-circle"></i> Stopped</span>
                 {% endif %}
             </div>
-        </div>
-
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light">
-                <h5 class="mb-0"><i class="far fa-clock mr-2"></i>Date & Time</h5>
+            <div class="col-md-4 text-center border-left border-right">
+                <strong>Uptime:</strong> <span class="text-muted">{{ scheduler_info.uptime }}</span>
             </div>
-            <div class="card-body">
-                <p class="text-muted">Current system date: <strong>{{ date }}</strong></p>
-                <form action="" method="post" name="login" class="form-inline">
-                    {{ app_setting_form.hidden_tag() }}
-                    <div class="input-group date mr-2 mb-2" id="datetimepicker1" data-target-input="nearest" style="flex-grow: 1;">
-                        {{ app_setting_form.systemDate(class="form-control") }}
-                        <div class="input-group-append" data-target="#datetimepicker1" data-toggle="datetimepicker">
-                            <div class="input-group-text"><i class="far fa-calendar"></i></div>
-                        </div>
-                    </div>
-                    <button type="submit" name="action" value="set" class="btn btn-info mb-2">Set</button>
-                </form>
-                {% for error in app_setting_form.systemDate.errors %}
-                <div class="alert alert-danger mt-2">
-                    {{ error }}
+            <div class="col-md-4 text-right">
+                <strong>Running Jobs:</strong> <span class="badge badge-pill badge-secondary">{{ scheduler_info.active_jobs_count|default(scheduler_info.running_jobs|length) }}</span>
+            </div>
+        </div>
+        
+        <!-- Row 2: Identity & Storage -->
+        <div class="row small">
+            <div class="col-md-4 text-truncate" title="Hostname: {{ scheduler_info.identity.hostname }}">
+                <strong>Network:</strong> <span class="text-primary">{{ scheduler_info.identity.ip }}</span> 
+                <span class="text-muted">({{ scheduler_info.identity.hostname }})</span>
+            </div>
+            <div class="col-md-4 text-center border-left border-right">
+                <strong>Storage:</strong> 
+                {% set storage = scheduler_info.system_health.storage %}
+                <span class="{% if storage.percent_used > 90 %}text-danger font-weight-bold{% else %}text-muted{% endif %}">
+                    {{ storage.percent_used }}% Used 
+                </span>
+                <span class="text-muted small">({{ storage.free_gb }} GB free)</span>
+            </div>
+            <div class="col-md-4 text-right">
+                <strong>MAC:</strong> <span class="text-monospace text-muted">{{ scheduler_info.identity.mac }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     SECTION 1: ROUTINE INITIALIZATION
+     ========================================== -->
+<div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+    <h3 class="text-secondary mb-0"><i class="fas fa-tasks mr-2"></i>1. Routine Initialization</h3>
+    <button class="btn btn-sm btn-outline-secondary" type="button" data-toggle="collapse" data-target="#routineCollapse" aria-expanded="true" aria-controls="routineCollapse">
+        <i class="fas fa-eye-slash mr-1"></i> Toggle Section
+    </button>
+</div>
+
+<div class="collapse show" id="routineCollapse">
+    <div class="row mb-5">
+        
+        <!-- Date & Time Settings -->
+        <div class="col-lg-5 mb-3">
+            <div class="card shadow-sm h-100 border-info">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="far fa-clock mr-2"></i>Date & Time</h5>
                 </div>
-                {% endfor %}
+                <div class="card-body">
+                    <p class="text-muted small">Current system time: <strong class="text-dark">{{ date }}</strong></p>
+                    <form action="" method="post" name="app_setting">
+                        {{ app_setting_form.hidden_tag() }}
+                        <div class="custom-control custom-switch mb-3">
+                            {{ app_setting_form.sync_mode(class="custom-control-input", id="sync_mode") }}
+                            <label class="custom-control-label" for="sync_mode">Auto-Sync Time (NTP)</label>
+                        </div>
+                        <div class="form-group mb-2">
+                            <label class="font-weight-bold small mb-1">Time Zone</label>
+                            {{ app_setting_form.time_zone(class="form-control form-control-sm custom-select") }}
+                        </div>
+                        <div class="form-group mb-2" id="ntp_group">
+                            <label class="font-weight-bold small mb-1">NTP Server</label>
+                            {{ app_setting_form.ntp_server(class="form-control form-control-sm") }}
+                        </div>
+                        <div class="form-group mb-2" id="manual_date_group" style="display: none;">
+                            <label class="font-weight-bold small mb-1">Manual Date</label>
+                            <div class="input-group input-group-sm date" id="datetimepicker1" data-target-input="nearest">
+                                {{ app_setting_form.systemDate(class="form-control datetimepicker-input", **{'data-target': '#datetimepicker1'}) }}
+                                <div class="input-group-append" data-target="#datetimepicker1" data-toggle="datetimepicker">
+                                    <div class="input-group-text"><i class="far fa-calendar"></i></div>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="submit" name="action" value="set_time" class="btn btn-info btn-sm btn-block mt-3">Apply Time</button>
+                    </form>
+                    {% for error in app_setting_form.systemDate.errors %}
+                    <div class="alert alert-danger mt-2 small py-1">{{ error }}</div>
+                    {% endfor %}
+                </div>
             </div>
         </div>
 
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light">
-                <h5 class="mb-0"><i class="fas fa-server mr-2"></i>System Status</h5>
-            </div>
-            <div class="card-body">
-                <dl class="row mb-0">
-                    <dt class="col-sm-4">Scheduler:</dt>
-                    <dd class="col-sm-8">
-                        {% if scheduler_info.status == 'running' %}
-                            <span class="text-success"><i class="fas fa-check-circle"></i> Running</span>
-                        {% else %}
-                            <span class="text-danger"><i class="fas fa-stop-circle"></i> Stopped</span>
-                        {% endif %}
-                    </dd>
+        <!-- Hardware Diagnostics -->
+        <div class="col-lg-4 mb-3">
+            <div class="card shadow-sm h-100 border-warning" id="diagnostics-panel">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0"><i class="fas fa-stethoscope mr-2"></i>Diagnostics</h5>
+                </div>
+                <div class="card-body d-flex flex-column justify-content-between">
+                    Scan cameras and test infrared lights
+                
+                    <div data-live-update="diagnostic-controls">
+                            {% set lock = scheduler_info.lock_info %}
+                            {% if lock.status == 'LOCKED' and lock.owner == 'System' %}
+                                <div class="alert alert-info py-2 mb-2 text-center shadow-sm" role="alert">
+                                    <i class="fas fa-spinner fa-spin fa-2x mb-2"></i><br>
+                                    <strong>Scanning in progress...</strong>
+                                </div>
+                            {% elif lock.status in ['LOCKED', 'REQUESTING'] %}
+                                <div class="alert alert-warning py-2 mb-2 text-center shadow-sm" role="alert">
+                                    <i class="fas fa-lock fa-2x text-muted mb-2"></i><br>
+                                    <strong>Hardware busy.</strong><br>
+                                    <small>Locked by: {{ lock.owner }}</small>
+                                </div>
+                            {% else %}
+                                <button type="button" onclick="runDiagnostic()" class="btn btn-warning btn-block btn-diagnostic shadow-sm">
+                                    <i class="fas fa-stethoscope mr-1"></i> Run Hardware Scan
+                                </button>
+                            {% endif %}
+                        </div>
+                    
+                    <div class="mt-3 p-2 bg-light border rounded text-center small">
+                        <strong>Last Scan Status:</strong><br>
+                        <span id="diag-status-text" data-live-update="diag-status-text">
+                            {% set last_diag = scheduler_info.last_diagnostic %}
+                            {% if last_diag and last_diag.time %}
+                                <span class="{% if last_diag.global_result == 'PASS' %}text-success{% else %}text-danger{% endif %} font-weight-bold">
+                                    {{ last_diag.global_result }}
+                                </span> 
+                                <br>
+                                <span class="text-muted">{{ last_diag.message }}</span><br>
+                                <span class="text-muted font-italic" style="font-size: 0.75rem;">{{ last_diag.time }}</span>
+                            {% elif scheduler_info.cam_reports %}
+                                <span class="text-muted">Completed. Check camera list below.</span>
+                            {% else %}
+                                <span class="text-muted">No information available.</span>
+                            {% endif %}
+                        </span>
+                    </div>
 
-                    <dt class="col-sm-4">Hardware Lock:</dt>
-                    <dd class="col-sm-8">
+                </div>
+            </div>
+        </div>
+
+        <!-- Reboot Control -->
+        <div class="col-lg-3 mb-3">
+            <div class="card shadow-sm h-100 border-danger">
+                <div class="card-header bg-danger text-white">
+                    <h5 class="mb-0"><i class="fas fa-power-off mr-2"></i>System</h5>
+                </div>
+                <div class="card-body text-center d-flex flex-column justify-content-center">
+                    <p class="small text-muted mb-4">Reboot the Raspberry Pi if diagnostics fail or cameras are unresponsive.</p>
+                    <button type="button" onclick="rebootSystem()" class="btn btn-outline-danger btn-block">
+                        <i class="fas fa-sync-alt mr-1"></i> Reboot Module
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     SECTION 2: CAMERA CALIBRATION
+     ========================================== -->
+<h3 class="border-bottom pb-2 mb-4 text-secondary mt-2"><i class="fas fa-camera mr-2"></i>2. Camera Calibration</h3>
+<div class="row mb-4">
+    
+    <!-- Environment Lighting -->
+    <div class="col-lg-3 mb-4">
+        <div class="card shadow-sm h-100" id="lighting-status-panel">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-lightbulb mr-2"></i>Lighting</h5>
+                <div data-live-update="lighting-badge">
+                    {% if light_state %}
+                        <span class="badge badge-warning"><i class="fas fa-sun"></i> ON</span>
+                    {% else %}
+                        <span class="badge badge-secondary"><i class="fas fa-moon"></i> OFF</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body text-center d-flex flex-column justify-content-between">
+                <div>
+                    <p class="card-text text-muted small">Toggle IR LEDs before focusing to simulate the environment.</p>
+                    <div class="custom-control custom-switch custom-switch-lg mb-4">
+                        <input type="checkbox" class="custom-control-input" id="backlight-ir"
+                               {% if light_state %}checked{% endif %}
+                               onchange="toggleConfigLight(this.checked)">
+                        <label class="custom-control-label font-weight-bold" for="backlight-ir">IR Backlight</label>
+                    </div>
+                </div>
+                
+                <!-- ENLARGED: Integrated General Lights Diagnostics -->
+                <div class="mt-4 pt-3 border-top text-center">
+                    <strong class="text-dark d-block mb-2" style="font-size: 1.1rem;">IR Check Status</strong>
+                    {% set lights = scheduler_info.lights_info | default({}) %}
+                    {% set l_health = lights.get('health_check', {}) %}
+                    
+                    <div class="mb-2" style="font-size: 1.25rem;">
+                        {% if l_health.status == 'OK' %}
+                            <span class="text-success font-weight-bold"><i class="fas fa-check-circle mr-1"></i> OK</span>
+                        {% elif l_health.status == 'NOT DETECTED' %}
+                            <span class="text-danger font-weight-bold"><i class="fas fa-times-circle mr-1"></i> Not Detected</span>
+                        {% else %}
+                            <span class="text-muted"><i class="fas fa-question-circle mr-1"></i> Untested</span>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="text-muted font-italic mb-3" style="font-size: 0.8rem;">
+                        Tested: {{ l_health.last_test | default('Never run') }}
+                    </div>
+                    
+                    <!-- NEW: Button to toggle the inline results panel -->
+                    <button type="button" id="show-results-btn" class="btn btn-outline-info btn-block shadow-sm" onclick="toggleLightResults()" {% if not l_health.status %}style="display: none;"{% endif %}>
+                        <i class="fas fa-images mr-1"></i> Show Results
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Camera List -->
+    <div class="col-lg-9 mb-4">
+        <div class="card shadow-sm h-100" id="camera-list-panel">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-sliders-h mr-2"></i>Focus & Testing</h5>
+                
+                <div class="d-flex align-items-center">
+                    {% if scheduler_info.next_picture and scheduler_info.next_picture != 'None' %}
+                    <span class="d-none d-lg-inline-flex align-items-center bg-white border rounded px-2 py-1 shadow-sm mr-3" style="font-size: 0.9rem;">
+                        <i class="far fa-calendar-check text-muted mr-1"></i>
+                        <span class="text-dark font-weight-bold mx-1">Next Picture: {{ scheduler_info.next_picture }}</span>
+                        <span class="border-left mx-2" style="height: 16px;"></span>
+                        <span class="badge badge-pill badge-success countdown-badge" data-target-time="{{ scheduler_info.next_picture }}">
+                            <i class="fas fa-stopwatch mr-1"></i> <span class="countdown-text">...</span>
+                        </span>
+                    </span>
+                    {% endif %}
+
+                    <div data-live-update="camera-list-lock" class="d-inline-block">
                         {% set lock = scheduler_info.lock_info %}
-                        {% if lock.status == 'FREE' %}
-                            <span class="badge badge-success">FREE</span>
-                        {% elif lock.status == 'LOCKED' %}
-                            <span class="badge badge-danger">LOCKED</span>
-                            <div class="small text-muted mt-1">
-                                <i class="fas fa-user-lock"></i> {{ lock.owner }}
-                                {% if lock.details %}
-                                    <br>({{ lock.details }})
+                        {% if lock.status != 'FREE' %}
+                            <span class="badge badge-warning shadow-sm"><i class="fas fa-lock"></i> Hardware Locked</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                {% for camera_id in config.CAMS %}
+                    {% set data = scheduler_info.cam_reports.get(camera_id|string, {}) %}
+                    {% set health = data.get('health', 'UNTESTED') %}
+                    {% set activity = data.get('activity', 'IDLE') %}
+                    
+                    <li class="list-group-item d-flex flex-column flex-md-row justify-content-between align-items-md-center py-3">
+                        <div class="mb-3 mb-md-0 w-50">
+                            <div class="d-flex align-items-center mb-1">
+                                <span class="h6 mb-0 mr-2"><i class="fas fa-video text-muted mr-1"></i> Camera {{ camera_id }}</span>
+                                <span data-live-update="cam-health-{{ camera_id }}">
+                                    <span class="badge badge-pill {% if health == 'OK' %}badge-success{% elif health == 'UNTESTED' %}badge-secondary{% elif health in ['NOT DETECTED', 'ERROR'] %}badge-danger{% else %}badge-secondary{% endif %}">
+                                        {{ health }}
+                                    </span>
+                                    {% if activity == 'CAPTURING' %}
+                                    <span class="badge badge-pill badge-warning ml-1">CAPTURING</span>
+                                    {% endif %}
+                                </span>
+                            </div>
+                            
+                            <div data-live-update="cam-status-{{ camera_id }}" class="small text-muted mt-1">
+                                <strong>Checked:</strong> {{ data.get('last_check', 'Never') }}<br>
+                                <strong>Last Picture:</strong> 
+                                {% if data.path %}
+                                    Available
+                                {% else %}
+                                    <span class="text-danger font-italic">No image available</span>
                                 {% endif %}
                             </div>
-                        {% elif lock.status == 'REQUESTING' %}
-                            <span class="badge badge-warning">REQUESTING</span>
-                            <div class="small text-muted mt-1">
-                                <i class="fas fa-hand-paper"></i> {{ lock.owner }}
-                            </div>
-                        {% else %}
-                            <span class="badge badge-secondary">{{ lock.status }}</span>
-                        {% endif %}
-                    </dd>
-
-                    <dt class="col-sm-4">Running Jobs:</dt>
-                    <dd class="col-sm-8">{{ scheduler_info.running_jobs|length }}</dd>
-
-                    <dt class="col-sm-4">Uptime:</dt>
-                    <dd class="col-sm-8">{{ scheduler_info.uptime }}</dd>
-                    
-                    <dt class="col-sm-4">Multiplexer:</dt>
-                    <dd class="col-sm-8">{{ scheduler_info.multiplexer }}</dd>
-
-                    <dt class="col-sm-4">Last Capture:</dt>
-                    <dd class="col-sm-8">{{ scheduler_info.last_picture }}</dd>
-                </dl>
-                
-                <hr>
-                
-                <h6 class="font-weight-bold mb-3">Camera Health</h6>
-                <ul class="list-group list-group-flush">
-                {% for id, data in scheduler_info.cam_reports.items() %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-                        <div>
-                            <span class="badge badge-pill mr-2 {% if data.health == 'OK' %}badge-success{% elif data.health in ['CAPTURING', 'TESTING'] %}badge-warning{% elif data.health == 'WAITING' %}badge-secondary{% else %}badge-danger{% endif %}">
-                                Cam {{ id }}
-                            </span>
-                            <span class="text-muted small">{{ data.health }}</span>
-                            <div class="small text-muted pl-1">Checked: {{ data.last_check }}</div>
                         </div>
                         
-                        {% if data.path and data.health == 'OK' %}
-                        <a href="{{ url_for('api_exp.get_system_image', filename=data.path) }}" target="_blank" class="btn btn-sm btn-outline-primary">
-                            <i class="far fa-eye"></i> View
-                        </a>
-                        {% endif %}
+                        <div class="btn-group shadow-sm" role="group" data-live-update="cam-btn-group-{{ camera_id }}">
+                            {% if data.path and health == 'OK' %}
+                            <a href="{{ url_for('api_exp.get_system_image', filename=data.path) }}" target="_blank" class="btn btn-outline-info btn-sm">
+                                <i class="far fa-image mr-1"></i> View Picture
+                            </a>
+                            {% else %}
+                            <span class="btn btn-outline-secondary btn-sm disabled" style="opacity: 0.5; cursor: not-allowed;">
+                                <i class="fas fa-times mr-1"></i> No Picture
+                            </span>
+                            {% endif %}
+
+                            <a href="{{ url_for('focus_page.index', cam_id=camera_id) }}" class="btn btn-outline-primary btn-sm {% if lock.status != 'FREE' and lock.owner != 'System' %}disabled{% endif %}">
+                                <i class="fas fa-crosshairs mr-1"></i> Live Focus
+                            </a>
+                            
+                            <button type="button" 
+                                    id="test-pic-btn-{{ camera_id }}"
+                                    class="btn btn-outline-success btn-sm {% if lock.status != 'FREE' %}disabled{% endif %}" 
+                                    onclick="testSingleCamera({{ camera_id }}, '{{ url_for('api_exp.test_single_camera', cam_id=camera_id) }}')">
+                                <i class="fas fa-camera-retro mr-1"></i> Test Pic
+                            </button>
+
+                            <button type="button" 
+                                    id="test-lights-btn-{{ camera_id }}"
+                                    class="btn btn-outline-warning btn-sm {% if lock.status != 'FREE' %}disabled{% endif %}" 
+                                    onclick="testCameraLights({{ camera_id }}, '{{ url_for('api_exp.test_camera_lights', cam_id=camera_id) }}')">
+                                <i class="fas fa-lightbulb mr-1"></i> Test Lights
+                            </button>
+                        </div>
                     </li>
                 {% endfor %}
                 </ul>
             </div>
         </div>
-
     </div>
+</div>
 
-    <div class="col-lg-6">
-        <div class="card mb-4 shadow-sm border-danger">
-            <div class="card-header bg-danger text-white">
-                <h5 class="mb-0"><i class="fas fa-power-off mr-2"></i>System Control</h5>
+<!-- ==========================================
+     INLINE LIGHT TEST RESULTS PANEL (Hidden)
+     ========================================== -->
+{% set l_health = scheduler_info.lights_info.get('health_check', {}) %}
+<div id="inline-light-results" style="display: none;" class="mb-5">
+    <div class="card shadow border-info">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-lightbulb text-warning mr-2"></i> IR Light Analysis Details</h5>
+            <button type="button" class="btn btn-sm btn-outline-light" onclick="$('#inline-light-results').slideUp();">
+                <i class="fas fa-times"></i> Close
+            </button>
+        </div>
+        <div class="card-body bg-light">
+            <div class="text-center mb-4 mt-2">
+                <h4 id="lt-status-badge">
+                    {% if l_health.status == 'OK' %}
+                        <span class="badge badge-success px-4 py-2 shadow-sm"><i class="fas fa-check-circle mr-2"></i>OK</span>
+                    {% elif l_health.status == 'NOT DETECTED' %}
+                        <span class="badge badge-danger px-4 py-2 shadow-sm"><i class="fas fa-times-circle mr-2"></i>NOT DETECTED</span>
+                    {% else %}
+                        <span class="badge badge-secondary px-4 py-2 shadow-sm"><i class="fas fa-question-circle mr-2"></i>UNTESTED</span>
+                    {% endif %}
+                </h4>
+                <p class="text-muted small mt-2">Exposure is locked. Average shift is measured against baseline variance.</p>
             </div>
-            <div class="card-body text-center">
-                <p>Reboot the entire Raspberry Pi module.</p>
+            
+            <div class="row text-center mb-3">
+                <div class="col-6">
+                    <h6 class="font-weight-bold text-secondary">Lights OFF</h6>
+                    <div class="bg-white p-2 border rounded shadow-sm">
+                        <img id="lt-img-off" src="{% if l_health.path_off %}{{ url_for('api_exp.get_system_image', filename=l_health.path_off) }}{% endif %}" 
+                            class="img-fluid rounded mb-2 bg-dark" style="max-height: 160px; object-fit: contain; width: 100%;" alt="Lights Off">
+                        <div class="small text-muted" style="line-height: 1.3;">
+                            Mean: <strong id="lt-mean-off" class="text-dark">{{ l_health.intensity_off_mean | default('-') }}</strong><br>
+                            Std Dev: <span id="lt-std-off">{{ l_health.intensity_off_std | default('-') }}</span>
+                        </div>
+                    </div>
+                </div>
                 
-                <button type="button" onclick="rebootSystem()" class="btn btn-outline-danger btn-lg btn-block">
-                    <i class="fas fa-sync-alt"></i> Reboot Module
-                </button>
+                <div class="col-6">
+                    <h6 class="font-weight-bold text-secondary">Lights ON</h6>
+                    <div class="bg-white p-2 border rounded shadow-sm">
+                        <img id="lt-img-on" src="{% if l_health.path_on %}{{ url_for('api_exp.get_system_image', filename=l_health.path_on) }}{% endif %}" 
+                            class="img-fluid rounded mb-2 bg-dark" style="max-height: 160px; object-fit: contain; width: 100%;" alt="Lights On">
+                        <div class="small text-muted" style="line-height: 1.3;">
+                            Mean: <strong id="lt-mean-on" class="text-dark">{{ l_health.intensity_on_mean | default('-') }}</strong><br>
+                            Std Dev: <span id="lt-std-on">{{ l_health.intensity_on_std | default('-') }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-info text-center py-2 mb-0 shadow-sm border-info">
+                <span id="lt-diff-container" class="align-middle">
+                    {% if l_health.statistical_effect_size is defined %}
+                        <span class="badge {% if l_health.statistical_effect_size > 1.0 %}badge-success{% else %}badge-danger{% endif %} px-3 py-1 shadow-sm" style="font-size: 1rem;">
+                            Effect Size: {{ l_health.statistical_effect_size }}
+                        </span>
+                        <small class="text-muted ml-2 font-weight-bold">(Threshold to pass: > 1.0)</small>
+                    {% else %}
+                        <span class="badge badge-secondary px-3 py-1 shadow-sm">No data</span>
+                    {% endif %}
+                </span>
             </div>
         </div>
+    </div>
+</div>
 
-        <script>
-        function rebootSystem() {
-            if(!confirm('Are you sure you want to reboot the device?')) return;
-            
-            fetch("{{ url_for('api_exp.reboot') }}", {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'}
-            })
-            .then(res => {
-                alert("Reboot command sent. The interface will be unavailable for a minute.");
-            });
-        }
-        </script>
-
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="fas fa-lightbulb mr-2"></i>Backlight</h5>
-                {% if light_state %}
-                    <span class="badge badge-warning">ON <i class="fas fa-sun"></i></span>
-                {% else %}
-                    <span class="badge badge-secondary">OFF <i class="fas fa-moon"></i></span>
-                {% endif %}
+<!-- ==========================================
+     SECTION 3: ADVANCED HARDWARE (Set once)
+     ========================================== -->
+<h3 class="border-bottom pb-2 mb-4 text-danger"><i class="fas fa-cogs mr-2"></i>3. Advanced Hardware Configuration</h3>
+<div class="row mb-5">
+    <div class="col-12">
+        <div class="card shadow-sm border-danger">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="fas fa-microchip mr-2"></i>Hardware Topology</h5>
             </div>
             <div class="card-body">
-                <p class="card-text text-muted small">Toggle the IR illumination for all camera ports.</p>
+                <p class="text-muted small">Select your module's physical hardware. Incorrect settings will cause failures.</p>
                 
-                <form action="" method="post" name="backlight">
-                    {{ backlight_form.hidden_tag() }}
+                <form action="" method="post" name="hw_setting" id="hw_setting_form" onsubmit="return handleHardwareSubmit(event);">
+                    {{ hw_form.hidden_tag() }}
+                    <input type="hidden" name="action" value="set_hw">
                     
-                    <div class="form-group">
-                        <div class="custom-control custom-switch custom-switch-lg mb-3 text-center">
-                            {{ backlight_form.ir(class="custom-control-input", id="backlight-ir") }}
-                            <label class="custom-control-label font-weight-bold" for="backlight-ir">
-                                Enable IR Backlight
-                            </label>
+                    <div class="row">
+                        <div class="col-md-3 form-group">
+                            <label class="font-weight-bold small">Multiplexer Type</label>
+                            {{ hw_form.selector_type(class="form-control custom-select", id="hw_selector") }}
                         </div>
                         
-                        {% for error in backlight_form.ir.errors %}
-                        <div class="alert alert-danger small py-1" role="alert">
-                            <i class="fas fa-exclamation-triangle"></i> {{error}}
+                        <div class="col-md-3 form-group">
+                            <label class="font-weight-bold small">Camera Sensor Model</label>
+                            {{ hw_form.camera_type(class="form-control custom-select", id="hw_camera") }}
                         </div>
-                        {% endfor %}
+
+                        <div class="col-md-3 form-group" id="hw_autofocus_group" {% if not has_autofocus %}style="display: none;"{% endif %}>
+                            <label class="font-weight-bold small">Focus Mode</label>
+                            {{ hw_form.focus_mode(class="form-control custom-select", id="hw_focus_mode") }}
+                        </div>
+                        
+                        <div class="col-md-3 form-group" id="hw_cams_group" style="display: none;">
+                            <label class="font-weight-bold small">Connected Cameras</label>
+                            <div class="d-flex flex-wrap">
+                                {% for subfield in hw_form.cams %}
+                                    <div class="custom-control custom-checkbox mr-3 mb-2">
+                                        {{ subfield(class="custom-control-input", id=subfield.id) }}
+                                        <label class="custom-control-label" for="{{ subfield.id }}">{{ subfield.label.text }}</label>
+                                    </div>
+                                {% endfor %}
+                            </div>
+                        </div>
                     </div>
 
-                    <button type="submit" name="action" value="set" class="btn btn-info btn-block">
-                        <i class="fas fa-save mr-2"></i> Apply Lighting
+                    <div class="custom-control custom-switch mb-2">
+                        {{ hw_form.crop_square(class="custom-control-input", id="hw_crop_square") }}
+                        <label class="custom-control-label small font-weight-bold" for="hw_crop_square">Crop images to square</label>
+                    </div>
+
+                    <button type="submit" id="hw_save_btn" class="btn btn-danger mt-3">
+                        <i class="fas fa-save mr-2"></i> Save Hardware Setup & Restart Services
                     </button>
                 </form>
             </div>
         </div>
-        
-        <div class="card mb-4 shadow-sm">
-            <div class="card-header bg-light">
-                <h5 class="mb-0"><i class="fas fa-camera mr-2"></i>Live Preview & Focus</h5>
+    </div>
+</div>
+
+<div class="row mb-5">
+    <div class="col-12">
+        <div class="card shadow-sm border-secondary">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0"><i class="fas fa-camera mr-2"></i>Camera Capture Profile</h5>
             </div>
             <div class="card-body">
-                <p class="text-muted">Select a camera to adjust focus:</p>
-                <div class="list-group">
-                    {% for camera_id in config.CAMS %}
-                    <a href="{{ url_for('focus_page.index', cam_id=camera_id) }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
-                        <span><i class="fas fa-video mr-2"></i> Camera {{ camera_id }}</span>
-                        <i class="fas fa-chevron-right text-muted"></i>
-                    </a>
-                    {% endfor %}
-                </div>
+                <p class="text-muted small">Select the active capture profile and tune the manual backlight values for easy testing. Saving restarts the services to apply the changes.</p>
+
+                <form action="" method="post" name="cam_setting" id="cam_setting_form" onsubmit="return handleHardwareSubmit(event);">
+                    {{ camera_form.hidden_tag() }}
+                    <input type="hidden" name="action" value="set_camera">
+
+                    <div class="row">
+                        <div class="col-md-6 form-group">
+                            <label class="font-weight-bold small">Active Capture Profile</label>
+                            {{ camera_form.default_profile(class="form-control custom-select", id="cam_default_profile") }}
+                        </div>
+                    </div>
+
+                    <hr>
+                    <p class="font-weight-bold small mb-2 text-secondary">Manual Backlight Tuning</p>
+                    <div class="row">
+                        <div class="col-md-4 form-group">
+                            <label class="font-weight-bold small">Exposure Time (us)</label>
+                            {{ camera_form.exposure_time(class="form-control", id="cam_exposure_time") }}
+                        </div>
+
+                        <div class="col-md-4 form-group">
+                            <label class="font-weight-bold small">Analogue Gain</label>
+                            {{ camera_form.analogue_gain(class="form-control", id="cam_analogue_gain", step="0.1") }}
+                        </div>
+
+                        <div class="col-md-4 form-group d-flex align-items-end">
+                            <div class="custom-control custom-switch mb-2">
+                                {{ camera_form.denoise(class="custom-control-input", id="cam_denoise") }}
+                                <label class="custom-control-label font-weight-bold small" for="cam_denoise">Denoise</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="cam_save_btn" class="btn btn-secondary mt-3">
+                        <i class="fas fa-save mr-2"></i> Save Camera Profile & Restart Services
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -266,24 +564,29 @@
     $(function () {
         $.fn.datetimepicker.Constructor.Default = $.extend({}, $.fn.datetimepicker.Constructor.Default, {
             icons: {
-                time: 'far fa-clock',
-                date: 'far fa-calendar',
-                up: 'fas fa-arrow-up',
-                down: 'fas fa-arrow-down',
-                previous: 'fas fa-chevron-left',
-                next: 'fas fa-chevron-right',
-                today: 'fas fa-calendar-check',
-                clear: 'fas fa-trash',
-                close: 'fas fa-times'
+                time: 'far fa-clock', date: 'far fa-calendar', up: 'fas fa-arrow-up', down: 'fas fa-arrow-down',
+                previous: 'fas fa-chevron-left', next: 'fas fa-chevron-right', today: 'fas fa-calendar-check',
+                clear: 'fas fa-trash', close: 'fas fa-times'
             } 
         });
-
         $('#datetimepicker1').datetimepicker({format: 'YYYY-MM-DD HH:mm:ss'});
     });
 
+    // Helper to toggle inline results
+    function toggleLightResults() {
+        let resultsDiv = $('#inline-light-results');
+        if (resultsDiv.is(":hidden")) {
+            resultsDiv.slideDown(400, function() {
+                resultsDiv[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+        } else {
+            resultsDiv.slideUp();
+        }
+    }
+
     function runDiagnostic() {
-        $('#scanStatus').slideDown();
-        $('.btn-warning').prop('disabled', true).addClass('disabled');
+        $('#diag-status-text').html('<span class="text-info"><i class="fas fa-spinner fa-spin mr-1"></i> Probe starting...</span>');
+        $('.btn-diagnostic').prop('disabled', true).addClass('disabled');
 
         fetch("{{ url_for('api_exp.diagnostic') }}", {
             method: 'POST',
@@ -291,17 +594,447 @@
         })
         .then(response => {
             if (response.ok) {
-                setTimeout(() => window.location.reload(), 2000);
+                $('#diag-status-text').html('<span class="text-info"><i class="fas fa-spinner fa-spin mr-1"></i> Running background scan...</span>');
             } else {
-                alert("Error starting diagnostic scan");
-                $('.btn-warning').prop('disabled', false).removeClass('disabled');
-                $('#scanStatus').hide();
+                showToast("Error starting diagnostic scan", "info");
+                $('.btn-diagnostic').prop('disabled', false).removeClass('disabled');
+                $('#diag-status-text').html('<span class="text-danger">Failed to start scan.</span>');
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            $('.btn-warning').prop('disabled', false).removeClass('disabled');
-            $('#scanStatus').hide();
+            $('.btn-diagnostic').prop('disabled', false).removeClass('disabled');
+            $('#diag-status-text').html('<span class="text-danger">Network error.</span>');
+            showToast("Network error while trying to run diagnostics.", "danger"); // REPLACED
+        });
+    }
+
+    async function handleHardwareSubmit(event) {
+        event.preventDefault(); 
+        
+        // Use the form that actually triggered the submit (hardware or camera).
+        const form = event.target;
+        const btn = form.querySelector('button[type="submit"]');
+        const originalText = btn.innerHTML;
+        
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Checking State...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch("{{ url_for('api_exp.get_system_status') }}");
+            const data = await response.json();
+
+            const isLocked = data.lock_info.status !== 'FREE';
+            const isSyncing = data.sync.is_syncing;
+            let details = [];
+
+            if (isLocked) {
+                details.push(`Hardware is locked by '${data.lock_info.owner}'. Restarting the service now will orphan the background processes and leave the hardware permanently jammed.`);
+            }
+            if (isSyncing) {
+                details.push(`A data sync is actively running. We strongly recommend canceling the sync first to prevent file corruption.`);
+            }
+
+            if (details.length > 0) {
+                // REPLACED: await asyncConfirm
+                const forceReboot = await asyncConfirm(
+                    "System Busy", 
+                    details.join('\n\n') + `\n\nDo you want to FORCE SAVE AND REBOOT the entire system instead? (A full reboot safely clears RAM locks and terminates transfers).`, 
+                    true // true = red danger button
+                );
+                
+                if (forceReboot) {
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Saving Config...';
+                    
+                    const formData = new FormData(form);
+                    await fetch(window.location.href, { method: 'POST', body: formData });
+                    
+                    btn.innerHTML = '<i class="fas fa-power-off mr-2"></i> Rebooting System...';
+                    await fetch("{{ url_for('api_exp.reboot') }}", { method: 'POST', headers: {'Content-Type': 'application/json'} });
+                    
+                    // REPLACED: showToast
+                    showToast("Configuration saved and system is rebooting. The interface will be unavailable for roughly 60 seconds.", "warning");
+                    return false;
+                } else {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    return false;
+                }
+            }
+
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Saving & Restarting...';
+            form.submit();
+
+        } catch (error) {
+            console.error("Failed to safely coordinate save/reboot", error);
+            
+            // REPLACED: await asyncConfirm
+            const force = await asyncConfirm("Network Error", "Could not verify system safety state. Force save and restart anyway?", true);
+            if (force) {
+                form.submit();
+            } else {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+        return false;
+    }
+
+    // CHANGED: Must be marked async to use await
+    async function rebootSystem() {
+        // REPLACED: await asyncConfirm
+        const confirmReboot = await asyncConfirm("Confirm Reboot", "Are you sure you want to reboot the device?");
+        if (!confirmReboot) return;
+        
+        fetch("{{ url_for('api_exp.reboot') }}", {
+            method: 'POST', headers: {'Content-Type': 'application/json'}
+        }).then(res => {
+            // REPLACED: showToast
+            showToast("Reboot command sent. The interface will be unavailable for a minute.", "warning");
+        });
+    }
+
+    function updateTimeFields() {
+        if ($('#sync_mode').is(':checked')) {
+            $('#manual_date_group').hide(); $('#ntp_group').show();
+        } else {
+            $('#manual_date_group').show(); $('#ntp_group').hide();
+        }
+    }
+    $('#sync_mode').change(updateTimeFields);
+    updateTimeFields(); 
+
+    function updateHardwareFields() {
+        var selVal = $('#hw_selector').val();
+        if (selVal !== 'SINGLE' && selVal !== 'NullSelector') {
+            $('#hw_cams_group').slideDown();
+        } else {
+            $('#hw_cams_group').slideUp();
+        }
+    }
+    $('#hw_selector').change(updateHardwareFields);
+    updateHardwareFields(); 
+
+    // NEW: Dynamic Autofocus Logic
+    function updateAutofocusFields() {
+        var camVal = $('#hw_camera').val();
+        if (camVal.includes('V3')) {
+            $('#hw_autofocus_group').fadeIn();
+        } else {
+            $('#hw_autofocus_group').fadeOut();
+        }
+    }
+    $('#hw_camera').change(updateAutofocusFields);
+    updateAutofocusFields();
+
+    // --- 1. The Multi-Badge Countdown Function ---
+    function updateCountdownDisplays() {
+        const badges = document.querySelectorAll('.countdown-badge');
+        
+        badges.forEach(badge => {
+            const targetTimeString = badge.getAttribute('data-target-time');
+            const textElement = badge.querySelector('.countdown-text');
+            
+            if (!targetTimeString || targetTimeString === "None" || targetTimeString.includes("Not")) {
+                badge.className = "badge badge-pill badge-secondary countdown-badge";
+                if(textElement) textElement.innerText = "Not scheduled";
+                return;
+            }
+
+            const safeDateString = targetTimeString.replace(' ', 'T');
+            const targetTime = new Date(safeDateString).getTime();
+            const now = new Date().getTime();
+
+            if (isNaN(targetTime)) return;
+
+            const diffMs = targetTime - now;
+            const diffSeconds = Math.floor(diffMs / 1000);
+
+            if (diffSeconds <= 0) {
+                if(textElement) textElement.innerText = "Due Now";
+                badge.className = "badge badge-pill badge-danger countdown-badge";
+                return;
+            }
+
+            const hours = Math.floor(diffSeconds / 3600);
+            const minutes = Math.floor((diffSeconds % 3600) / 60);
+            const seconds = diffSeconds % 60;
+
+            let timeDisplay = "";
+            if (hours > 0) timeDisplay += hours + "h ";
+            timeDisplay += minutes + "m " + seconds + "s";
+
+            if(textElement) textElement.innerText = timeDisplay;
+
+            // Traffic Light Logic
+            if (diffSeconds > 120) {
+                badge.className = "badge badge-pill badge-success countdown-badge";
+            } else if (diffSeconds > 60) {
+                badge.className = "badge badge-pill badge-warning countdown-badge";
+            } else {
+                badge.className = "badge badge-pill badge-danger countdown-badge";
+            }
+        });
+    }
+
+    // --- 2. Update the Auto Refresh with DOM Diffing ---
+    function startStatusAutoRefresh() {
+        setInterval(function() {
+            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT' || document.activeElement.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            fetch(window.location.href)
+                .then(response => response.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, "text/html");
+                    
+                    // SURGICAL UPDATE: Find every element flagged for live updates
+                    doc.querySelectorAll('[data-live-update]').forEach(newEl => {
+                        const id = newEl.getAttribute('data-live-update');
+                        const oldEl = document.querySelector(`[data-live-update="${id}"]`);
+                        
+                        if (oldEl) {
+                            // NEW: If this element contains a button actively processing a JS fetch, skip it.
+                            if (oldEl.classList.contains('js-active-btn') || oldEl.querySelector('.js-active-btn')) {
+                                return; 
+                            }
+
+                            // Only touch the DOM if the inner HTML or the classes have actually changed
+                            if (oldEl.innerHTML !== newEl.innerHTML || oldEl.className !== newEl.className) {
+                                oldEl.innerHTML = newEl.innerHTML;
+                                oldEl.className = newEl.className; // Ensures badge colors update safely
+                            }
+                        }
+                    });
+
+                    // Update the countdown logic immediately after swapping the text
+                    updateCountdownDisplays();
+                })
+                .catch(err => console.warn('Background status refresh failed', err));
+        }, 1000); 
+    }
+    
+    // --- 3. Initialize everything (Cleaned up) ---
+    $(document).ready(function() {
+        startStatusAutoRefresh();
+        
+        // Run the countdown calculation every 1 second
+        setInterval(updateCountdownDisplays, 1000);
+        
+        // Fire it immediately once so there's no 1-second delay on page load
+        updateCountdownDisplays(); 
+    });
+
+    function toggleConfigLight(isTurningOn) {
+        const toggleInput = document.getElementById('backlight-ir');
+        toggleInput.disabled = true;
+
+        fetch("{{ url_for('api_exp.toggle_light') }}", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ ir_state: isTurningOn })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const badge = document.querySelector('[data-live-update="lighting-badge"]');
+                if (badge) {
+                    if (data.light_state) {
+                        badge.innerHTML = '<span class="badge badge-warning"><i class="fas fa-sun"></i> ON</span>';
+                    } else {
+                        badge.innerHTML = '<span class="badge badge-secondary"><i class="fas fa-moon"></i> OFF</span>';
+                    }
+                }
+            } else {
+                showToast("Failed to toggle light: " + (data.error || "Unknown error"), "info");
+                toggleInput.checked = !isTurningOn;
+            }
+        })
+        .catch(error => {
+            console.error("Error:", error);
+            showToast("Network error while toggling light.", "info");
+            toggleInput.checked = !isTurningOn;
+        })
+        .finally(() => {
+            toggleInput.disabled = false;
+        });
+    }
+
+    const STATUS_URL = "{{ url_for('api_exp.get_system_status') }}";
+    const SYS_IMG_BASE = "{{ url_for('api_exp.get_system_image', filename='') }}";
+
+    function testSingleCamera(camId, url) {
+        let btn = $('#test-pic-btn-' + camId);
+        // Check both class and property to prevent double-clicks
+        if (btn.hasClass('disabled') || btn.prop('disabled')) return; 
+        
+        btn.addClass('js-active-btn'); // Protect this button from auto-refresh
+        
+        let originalHtml = btn.html();
+        btn.html('<i class="fas fa-spinner fa-spin mr-1"></i> Testing...').prop('disabled', true);
+
+        const toggle = document.getElementById('backlight-ir');
+        const useIr = toggle ? toggle.checked : false;
+
+        const restore = () => btn.html(originalHtml).prop('disabled', false).removeClass('js-active-btn');
+
+        // Snapshot the current image path so we can detect when a new one lands.
+        fetch(STATUS_URL)
+            .then(r => r.json())
+            .then(s => (((s.cam_reports || {})[camId]) || {}).path || null)
+            .catch(() => null)
+            .then(baselinePath => {
+                fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ ir: useIr })
+                })
+                .then(response => response.json().then(data => ({status: response.status, body: data})))
+                .then(res => {
+                    if (res.status !== 202 || !res.body.result) {
+                        showToast("Error queuing picture: " + (res.body.error || "Unknown error"), "info");
+                        restore();
+                        return;
+                    }
+                    pollCameraResult(camId, baselinePath, restore);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showToast("Network error while testing camera.", "info");
+                    restore();
+                });
+            });
+    }
+
+    function pollCameraResult(camId, baselinePath, restore) {
+        let attempts = 0;
+        const maxAttempts = 60; // ~60s safety timeout
+        const terminal = ['ERROR', 'NOT DETECTED'];
+        const interval = setInterval(() => {
+            attempts++;
+            fetch(STATUS_URL)
+                .then(r => r.json())
+                .then(s => {
+                    const cam = ((s.cam_reports || {})[camId]) || {};
+                    const gotNewPic = cam.path && cam.path !== baselinePath;
+                    if (gotNewPic || terminal.includes(cam.health) || attempts >= maxAttempts) {
+                        clearInterval(interval);
+                        restore();
+                        if (terminal.includes(cam.health)) {
+                            showToast("Camera " + camId + " test failed: " + cam.health, "info");
+                        } else if (attempts >= maxAttempts && !gotNewPic) {
+                            showToast("Camera " + camId + " test timed out.", "info");
+                        }
+                    }
+                })
+                .catch(() => {
+                    if (attempts >= maxAttempts) { clearInterval(interval); restore(); }
+                });
+        }, 1000);
+    }
+
+    function testCameraLights(camId, url) {
+        let btn = $('#test-lights-btn-' + camId);
+        if (btn.hasClass('disabled') || btn.prop('disabled')) return;
+        
+        btn.addClass('js-active-btn'); // Protect this button from auto-refresh
+        
+        let originalHtml = btn.html();
+        btn.html('<i class="fas fa-spinner fa-spin mr-1"></i> Testing...').prop('disabled', true);
+
+        let resultsBtn = $('#show-results-btn');
+        resultsBtn.html('<i class="fas fa-spinner fa-spin mr-1"></i> Test in Progress...').prop('disabled', true).show();
+        $('#inline-light-results').slideUp();
+
+        const restore = () => {
+            btn.html(originalHtml).prop('disabled', false).removeClass('js-active-btn');
+            resultsBtn.html('<i class="fas fa-images mr-1"></i> Show Results').prop('disabled', false);
+        };
+
+        // Snapshot the previous test timestamp to detect a fresh result.
+        fetch(STATUS_URL)
+            .then(r => r.json())
+            .then(s => ((((s.lights_info || {}).health_check) || {}).last_test) || null)
+            .catch(() => null)
+            .then(baselineTest => {
+                fetch(url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                })
+                .then(response => response.json().then(data => ({status: response.status, body: data})))
+                .then(res => {
+                    if (res.status !== 202 || !res.body.result) {
+                        showToast("Error queuing light test: " + (res.body.error || "Unknown error"), "info");
+                        restore();
+                        return;
+                    }
+                    pollLightResult(baselineTest, restore);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showToast("Network error while testing lights.", "info");
+                    restore();
+                });
+            });
+    }
+
+    function pollLightResult(baselineTest, restore) {
+        let attempts = 0;
+        const maxAttempts = 90; // ~90s safety timeout (OFF + ON capture pair)
+        const interval = setInterval(() => {
+            attempts++;
+            fetch(STATUS_URL)
+                .then(r => r.json())
+                .then(s => {
+                    const hc = (((s.lights_info || {}).health_check) || {});
+                    if (hc.last_test && hc.last_test !== baselineTest) {
+                        clearInterval(interval);
+                        renderLightResults(hc);
+                        restore();
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(interval);
+                        showToast("Light test timed out.", "info");
+                        restore();
+                    }
+                })
+                .catch(() => {
+                    if (attempts >= maxAttempts) { clearInterval(interval); restore(); }
+                });
+        }, 1000);
+    }
+
+    function renderLightResults(hc) {
+        if (hc.status === 'OK') {
+            $('#lt-status-badge').html('<span class="badge badge-success px-4 py-2 shadow-sm"><i class="fas fa-check-circle mr-2"></i>OK</span>');
+        } else if (hc.status === 'NOT DETECTED') {
+            $('#lt-status-badge').html('<span class="badge badge-danger px-4 py-2 shadow-sm"><i class="fas fa-times-circle mr-2"></i>NOT DETECTED</span>');
+        } else {
+            $('#lt-status-badge').html('<span class="badge badge-secondary px-4 py-2 shadow-sm"><i class="fas fa-question-circle mr-2"></i>UNTESTED</span>');
+        }
+
+        $('#lt-mean-off').text(hc.intensity_off_mean);
+        $('#lt-std-off').text(hc.intensity_off_std);
+        $('#lt-mean-on').text(hc.intensity_on_mean);
+        $('#lt-std-on').text(hc.intensity_on_std);
+
+        let effectSize = hc.statistical_effect_size;
+        let diffBadge = effectSize > 1.0 ? 'badge-success' : 'badge-danger';
+        $('#lt-diff-container').html(`
+            <span class="badge ${diffBadge} px-3 py-1 shadow-sm" style="font-size: 1rem;">
+                Effect Size: ${effectSize}
+            </span>
+            <small class="text-muted ml-2 font-weight-bold">(Threshold to pass: > 1.0)</small>
+        `);
+
+        let ts = new Date().getTime();
+        if (hc.path_off) $('#lt-img-off').attr('src', SYS_IMG_BASE + hc.path_off + '?t=' + ts);
+        if (hc.path_on) $('#lt-img-on').attr('src', SYS_IMG_BASE + hc.path_on + '?t=' + ts);
+
+        let resultsDiv = $('#inline-light-results');
+        resultsDiv.slideDown(400, function() {
+            resultsDiv[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
     }
 </script>

@@ -9,126 +9,85 @@ Modified on Feb 2026 by Nicolás Gaggion
 @email: "vladimir.daric@cnrs.fr"
 '''
 
+import gc
 import logging
 import time
-import subprocess
 import threading
+import subprocess
 from phototron.camera import CameraFactory
 from config import Config
 
+# --- Helper to setup SHDL logger ---
+def get_hw_logger(name):
+    logger = logging.getLogger("HW_" + name)
+    logger.setLevel(Config.LOG_LEVEL)
+    if not logger.handlers:
+        handler = logging.FileHandler(Config.SHDL_LOG_FILE)
+        handler.setFormatter(logging.Formatter(Config.LOG_FORMAT))
+        logger.addHandler(handler)
+        logger.propagate = False
+    return logger
+
 # --- Factory Class ---
 class SelectorFactory(object):
-    """Factory class to manage different multiplexer modules
-    Returns the appropriate class object.
-    """
     factories = {}
 
     @staticmethod
     def createSelector(selector_identifier):
-        if selector_identifier not in SelectorFactory.factories.keys():
-            SelectorFactory.factories[selector_identifier] = SelectorFactory.class_from_identifier(selector_identifier)
+        if not selector_identifier: selector_identifier = 'SINGLE'
+        if selector_identifier == 'IVPORT_4': selector_identifier = 'TYPE_QUAD2'
+            
+        if selector_identifier not in SelectorFactory.factories:
+            factory_obj = SelectorFactory.class_from_identifier(selector_identifier)
+            if not factory_obj:
+                logging.getLogger(__name__).error(f"CRITICAL: Selector '{selector_identifier}' not recognized.")
+                factory_obj = SingleCamera.Factory()
+            SelectorFactory.factories[selector_identifier] = factory_obj
+            
         return SelectorFactory.factories[selector_identifier].create()
 
     @staticmethod
     def class_from_identifier(identifier):
         for c in Selector.__subclasses__():
-            if c.selector_identifier == identifier:
+            if getattr(c, 'selector_identifier', None) == identifier:
                 return c.Factory()
+        return None
 
 # --- Abstract Base Class ---
 class Selector(object):
-    """Universal abstract class
-    All selector classes should inherit from this.
-    """
     selector_identifier = None
-    
-    def __init__(self, cameras):
-        pass
-
-    def is_free(self):
-        raise NotImplementedError
-
-    def self_check(self):
-        raise NotImplementedError
-
-    def enable_cam(self, port):
-        raise NotImplementedError
-
-    def get_active_camera(self):
-        raise NotImplementedError
-
-    def is_camera_v2(self):
-        raise NotImplementedError
-
-    def is_dual(self):
-        raise NotImplementedError
-
-    def jumper(self):
-        raise NotImplementedError
-
-    def ivport_type(self):
-        raise NotImplementedError
-
-    def capture(self, camera_id, image_path, params):
-        raise NotImplementedError
-
-    def get_camera(self):
-        raise NotImplementedError
+    def __init__(self, cameras): pass
+    def is_free(self): raise NotImplementedError
+    def self_check(self): raise NotImplementedError
+    def enable_cam(self, port): raise NotImplementedError
+    def get_active_camera(self): raise NotImplementedError
+    def is_camera_v2(self): raise NotImplementedError
+    def is_dual(self): raise NotImplementedError
+    def jumper(self): raise NotImplementedError
+    def ivport_type(self): raise NotImplementedError
+    def capture(self, camera_id, image_path, params): raise NotImplementedError
+    def get_camera(self): raise NotImplementedError
 
 
 #################################
-## IVPort_v2 Implementation
+## Single Camera Implementation
 #################################
 
-from ivport_v2 import ivport
+class SingleCamera(Selector):
+    selector_identifier = 'SINGLE'
+    Count = 0
 
-class IVPort_v2(Selector):
-    """IVPort_v2 module implementation with stability fixes
-    """
-    
-    Count = 0   # This represents the count of objects of this class
-    selector_identifier = 'TYPE_QUAD2'
-
-    def __init__(self, cameras=(1, 2, 3, 4)):
-        self.logger = self._get_logger()
-        self.logger.debug("IVPort_v2 object initializing...")
-        
+    def __init__(self, cameras=(1,)):
+        self.logger = get_hw_logger(__name__)
         self.lock = threading.Lock()
-        
         self.camera_type = Config.CAMERA_TYPE
-        
-        # Camera List Validation
-        try:
-            cameras = [int(elem) for elem in cameras] # Ensure list of ints
-        except ValueError:
-            raise ValueError('Please provide integer list')
-        
-        cameras = set(cameras)
-        if len(cameras) > 4:
-            raise ValueError('IVPort Quad module can handle maximum of 4 cameras')
-        elif max(cameras) > 4 or min(cameras) < 1:
-            raise ValueError('Invalid IVPort Quad module port value (1 to 4)')
-            
-        # Initialize Hardware
-        self.iv = ivport.IVPort(getattr(ivport, self.selector_identifier))
-        IVPort_v2.Count += 1
-        self.logger.debug("IVPort_v2 object initialized successfully")
+        SingleCamera.Count += 1
+        self.logger.debug("SingleCamera initialized.")
 
     def __del__(self):
-        if hasattr(self, 'logger'):
-            self.logger.debug('deleting : %s'%(self))
-        
-        IVPort_v2.Count -= 1
-        
-        if hasattr(self, 'iv'):
-            self.iv.close()
-            del self.iv
-
-    def _get_logger(self):
-        return logging.getLogger(__name__)
+        SingleCamera.Count -= 1
 
     def is_free(self):
-        """returns true only if the lock is NOT acquired"""
         locked = self.lock.acquire(blocking=False)
         if locked:
             self.lock.release()
@@ -136,115 +95,141 @@ class IVPort_v2(Selector):
         return False
 
     def enable_cam(self, port):
-        self.logger.debug(f"Switching to camera port {port}")
-        self.iv.camera_change(port)
-        time.sleep(0.2)
-
-    def get_active_camera(self):
-        return self.iv.camera
-
-    def is_camera_v2(self):
-        return self.iv.is_camera_v2
-
-    def is_dual(self):
-        return self.iv.is_dual
-
-    def jumper(self):
-        return self.iv.ivport_jumper
-
-    def ivport_type(self):
-        return self.iv.ivport_type
+        self.logger.debug(f"Virtual switch to port {port} ignored (Single Mode).")
+        time.sleep(0.1)
 
     def capture(self, camera_id, image_path, params):
-        """
-        Switches camera, waits for stabilization, captures image, and closes camera.
-        """
         self.enable_cam(camera_id)
-        
         camera = None
         try:
-            # Create Camera Instance
+            params["current_cam_id"] = str(camera_id)
             camera = CameraFactory.createCamera(self.camera_type)
-            
-            # Capture
             return camera.capture(image_path, params)
-            
         except Exception as e:
-            self.logger.error(f"Error capturing from Camera {camera_id}: {e}")
+            self.logger.error(f"Capture error on Cam {camera_id}: {e}")
             raise e
-            
         finally:
-            if camera and hasattr(camera, 'close'):
-                camera.close()
-
+            if camera:
+                if hasattr(camera, 'close'): 
+                    camera.close()
+                del camera   
+                gc.collect() 
     def get_camera(self):
-        # Warning: Using this without closing it manually might cause freezes
         return CameraFactory.createCamera(self.camera_type)
 
+    def self_check(self):
+        try:
+            camera = self.get_camera()
+            is_healthy = camera.camera_check()
+            if hasattr(camera, 'close'): camera.close()
+            return is_healthy
+        except Exception as e:
+            self.logger.error(f"SingleCamera self-check error: {e}")
+            return False
+        
+    def probe(self, camera_id):
+        self.enable_cam(camera_id)
+        
+        import os
+        if os.path.exists('/dev/video0'):
+            return True
+        else:
+            self.logger.error("Probe failed: /dev/video0 not found.")
+            return False
+        
+    class Factory:
+        def create(self): return SingleCamera()
+
+
+#################################
+## IVPort_v2 Implementation
+#################################
+
+class IVPort_v2(Selector):
+    selector_identifier = 'TYPE_QUAD2'
+    Count = 0
+
+    def __init__(self, cameras=(1, 2, 3, 4)):
+        self.logger = get_hw_logger(__name__)
+        self.lock = threading.Lock()
+        self.camera_type = Config.CAMERA_TYPE
+        self.iv = None
+        
+        try:
+            from ivport_v2 import ivport
+            # PASS THE TYPE_QUAD2 constant to the IVPort constructor!
+            self.iv = ivport.IVPort(iv_type=ivport.TYPE_QUAD2) 
+            self.logger.info("IVPort_v2 initialized successfully.")
+        except Exception as e:
+            self.logger.error(f"IVPort hardware init failed: {e}")
+
+        IVPort_v2.Count += 1
+
+    def __del__(self):
+        IVPort_v2.Count -= 1
+        if self.iv and hasattr(self.iv, 'close'): self.iv.close()
+
+    def is_free(self):
+        locked = self.lock.acquire(blocking=False)
+        if locked:
+            self.lock.release()
+            return True
+        return False
+
+    def enable_cam(self, port):
+        if self.iv:
+            self.logger.debug(f"Multiplexer: Switching to port {port}")
+            self.iv.camera_change(port)
+            time.sleep(0.2)
+        else:
+            self.logger.warning(f"Multiplexer: Switch to {port} failed - no hardware.")
+
+    def capture(self, camera_id, image_path, params):
+        self.enable_cam(camera_id)
+        camera = None
+        try:
+            params["current_cam_id"] = str(camera_id)
+            camera = CameraFactory.createCamera(self.camera_type)
+            return camera.capture(image_path, params)
+        except Exception as e:
+            self.logger.error(f"Capture error on Cam {camera_id}: {e}")
+            raise e
+        finally:
+            if camera:
+                if hasattr(camera, 'close'): 
+                    camera.close()
+                del camera   # Destroy the Python object reference
+                gc.collect() # Force immediate CMA memory release back to the OS
+
+    def get_camera(self):
+        return CameraFactory.createCamera(self.camera_type)
 
     def self_check(self):
-        """Test if multiplexer is working"""
+        if not self.iv: return False
         try:
-            result = subprocess.run(['i2cget', '-y', '1', '0x10'], 
-                                   capture_output=True)
+            result = subprocess.run(['i2cget', '-y', '1', '0x10'], capture_output=True)
             return result.returncode == 0
         except Exception as e:
-            self.logger.error(f"Self check failed: {e}")
+            self.logger.error(f"Multiplexer self-check error: {e}")
             return False
 
     def probe(self, camera_id):
-        """
-        Checks if a camera is responsive on the I2C bus.
-        """
+        if not self.iv: return False
         try:
-            # Switch the mux
-            self.iv.camera_change(camera_id)
-            time.sleep(Config.CAM_WARMUP)
-            
-            # Check if an I2C device exists at 0x10 (Standard for Pi Cam)
-            # -y 1 means bus 1. 0x10 is the address.
-            result = subprocess.run(['i2cget', '-y', '1', '0x10'], 
-                                   capture_output=True)
-            
-            # If returncode is 0, the chip responded
-            return result.returncode == 0
+            self.enable_cam(camera_id)
+            time.sleep(0.1)
+            result = subprocess.run(['i2cget', '-y', '1', '0x10'], capture_output=True)
+            if result.returncode != 0:
+                self.logger.error(f"Probe: Cam {camera_id} failed I2C check.")
+                return False
+                
+            camera = self.get_camera()
+            is_healthy = camera.camera_check()
+            if hasattr(camera, 'close'): camera.close()
+            return is_healthy
         except Exception as e:
-            self.logger.error(f"Probe failed: {e}")
+            self.logger.error(f"Probe failed for Cam {camera_id}: {e}")
             return False
         
     class Factory:
-        def create(self):
-            return IVPort_v2()
-
-
-#################################
-## Null selector - No multiplexer installed
-#################################
-
-class NullSelector(Selector):
-    """No camera multiplexer installed
-    Camera connected directly to Raspberry module.
-    """
-    selector_identifier = 'NullSelector'
-    
-    def __init__(self, cameras=1):
-        self.cameras = 1
-        # Placeholder for direct camera access
-        self.logger = logging.getLogger(__name__)
-
-    class Factory:
-        def create(self):
-            return NullSelector()
-
-    # Stub implementations to prevent crashes if methods are called
-    def is_free(self): return True
-    def self_check(self): return True
-    def enable_cam(self, port): pass
-    def capture(self, camera_id, image_path, params):
-        # Direct capture without switching
-        camera = CameraFactory.createCamera(Config.CAMERA_TYPE)
-        try:
-            return camera.capture(image_path, params)
-        finally:
-            if hasattr(camera, 'close'):
-                camera.close()
+        def create(self): return IVPort_v2()

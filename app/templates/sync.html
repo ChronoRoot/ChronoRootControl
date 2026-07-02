@@ -1,0 +1,513 @@
+{% extends "base.html" %}
+{% block title %}
+    {{ config.SITE_NAME }}
+{% endblock %}
+
+{% block content %}
+<h1 class="mt-5 mb-4"><i class="fas fa-cloud-upload-alt mr-2"></i>Data Synchronization</h1>
+
+<div class="row">
+    <!-- LEFT: Live Status & Manual Trigger -->
+    <div class="col-lg-4 mb-4">
+        <div class="card shadow-sm border-info h-100">
+            <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-satellite-dish mr-2"></i>Live Status</h5>
+                <span id="sync-enabled-badge" class="badge badge-secondary">Loading...</span>
+            </div>
+            <div class="card-body text-center d-flex flex-column justify-content-center">
+                
+                <!-- CURRENT ACTIVITY SECTION -->
+                <h6 class="text-uppercase text-muted small font-weight-bold mb-2">Current Activity</h6>
+                <div id="sync-icon" class="mb-2">
+                    <i class="fas fa-circle-notch fa-spin fa-3x text-secondary"></i>
+                </div>
+                <h5 id="sync-activity-text" class="font-weight-bold text-dark mb-4">
+                    Loading State...
+                </h5>
+                
+                <!-- LAST RESULT SECTION -->
+                <div class="bg-light rounded p-3 mb-4 text-left border">
+                    <h6 class="text-uppercase text-muted small font-weight-bold border-bottom pb-2 mb-2">
+                        Latest Result
+                    </h6>
+                    
+                    <div class="d-flex align-items-center mb-2">
+                        <div id="result-icon" class="mr-2"></div>
+                        <strong id="result-text" class="text-dark">Pending</strong>
+                    </div>
+
+                    <p class="text-muted small mb-1" id="sync-last-success">
+                        <i class="far fa-clock mr-1"></i> Never
+                    </p>
+                    <p class="text-muted small mb-0" id="sync-next-run">
+                        <i class="fas fa-forward mr-1"></i> Unknown
+                    </p>
+
+                    <!-- Dynamic Error Alert -->
+                    <div id="sync-error-box" class="alert alert-danger small py-2 mb-0 mt-2 d-none">
+                        <span id="sync-error-text"></span>
+                    </div>
+                </div>
+
+                {% if not has_dest %}
+                    <div class="alert alert-warning small py-2 mb-3">Configure and save a destination first.</div>
+                {% endif %}
+
+                <!-- NEW: Dynamic Button Wrapper -->
+                <div class="mt-auto w-100">
+                    <!-- Starts visible, hidden if syncing -->
+                    <button type="button" id="btn-sync-now" class="btn btn-lg btn-outline-info w-100 {% if sync_status.is_syncing %}d-none{% endif %}" 
+                            onclick="triggerManualSync()" {% if not has_dest %}disabled{% endif %}>
+                        <i class="fas fa-play mr-2"></i> Sync Now
+                    </button>
+                    
+                    <!-- Starts hidden, visible if syncing -->
+                    <button type="button" id="btn-cancel-sync" class="btn btn-lg btn-outline-danger w-100 {% if not sync_status.is_syncing %}d-none{% endif %}" 
+                            onclick="cancelActiveSync()">
+                        <i class="fas fa-stop mr-2"></i> Cancel Sync
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: Configuration Form -->
+    <div class="col-lg-8 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-light">
+                <h5 class="mb-0"><i class="fas fa-cogs mr-2"></i>Sync Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form action="" method="post" id="sync_setting_form" onsubmit="return handleSyncSubmit(event);">
+                    {{ form.hidden_tag() }}
+                    
+                    <div class="row bg-light rounded p-3 mb-4 mx-0">
+                        <div class="col-md-6">
+                            <div class="custom-control custom-switch custom-switch-lg mt-1">
+                                {{ form.sync_enabled(class="custom-control-input", id="sync_enabled") }}
+                                <label class="custom-control-label font-weight-bold" for="sync_enabled">Background Auto-Sync</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6" id="interval-group">
+                            {{ form.sync_interval(class="form-control form-control-sm") }}
+                            <small class="text-muted">Interval (Minutes)</small>
+                        </div>
+                    </div>
+
+                    <div class="form-group w-50">
+                        <label class="font-weight-bold">Connection Type</label>
+                        {{ form.remote_type(class="form-control custom-select", id="remote_type") }}
+                    </div>
+
+                    <!-- Dynamic Network Credentials Box -->
+                    <div id="network-credentials" class="border rounded p-3 mb-3 bg-white" style="display: none;">
+                        <h6 class="text-muted border-bottom pb-2 mb-3">Server Credentials</h6>
+                        <div class="row">
+                            <div class="col-md-8 form-group">
+                                <label>Host IP / Address</label>
+                                {{ form.host(class="form-control") }}
+                            </div>
+                            <div class="col-md-4 form-group">
+                                <label>Port</label>
+                                {{ form.port(class="form-control", placeholder="Default") }}
+                            </div>
+                            <div class="col-md-6 form-group">
+                                <label>Username</label>
+                                {{ form.user(class="form-control") }}
+                            </div>
+                            <div class="col-md-6 form-group">
+                                <label>Password</label>
+                                <!-- NEW: Password Eye Toggle Group -->
+                                <div class="input-group">
+                                    {{ form.password(class="form-control", id="sync_password") }}
+                                    <div class="input-group-append">
+                                        <button class="btn btn-outline-secondary" type="button" id="togglePassword" title="Show/Hide Password">
+                                            <i class="fas fa-eye" id="togglePasswordIcon"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- NEW: Dynamic Cloud Instructions Box -->
+                    <div id="cloud-instructions-box" class="border border-warning rounded p-3 mb-3" style="background-color: #fffdf5; display: none;">
+                        <h6 class="text-warning font-weight-bold border-bottom border-warning pb-2 mb-2">
+                            <i class="fas fa-exclamation-triangle mr-1"></i> Advanced Setup Required
+                        </h6>
+                        <p class="small text-muted mb-2">
+                            Configuring a commercial cloud provider (Google Drive, AWS S3, Dropbox, etc.) requires manual authorization. We assume this step is performed by a developer or system administrator.
+                        </p>
+                        <ul class="small text-muted mb-0 pl-3">
+                            <li>Access the robot via SSH Terminal.</li>
+                            <li>Run the command <code>rclone config</code> to interactively generate the required OAuth web tokens or API access keys.</li>
+                            <li>Ensure the new remote profile is saved into the system's active <code>rclone.conf</code> file.</li>
+                            <li>Once fully configured in the terminal, type the exact Remote Name you created below.</li>
+                        </ul>
+                    </div>
+
+                    <div class="form-group mt-2">
+                        <!-- NEW: Dynamic Labels -->
+                        <label class="font-weight-bold" id="dest-label">Destination Folder</label>
+                        
+                        <div id="local-mounts-box" class="mb-2" style="display: none;">
+                            <select class="form-control custom-select bg-light text-info border-info" id="mount_quick_select">
+                                <option value="" selected disabled>-- Select a Mounted Drive to auto-fill --</option>
+                                {% for m in mounts %}
+                                    <option value="{{ m.mountpoint }}">{{ m.device }} ({{ m.mountpoint }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        {{ form.destination_path(class="form-control", id="destination_path_input") }}
+                        <!-- NEW: Dynamic Description -->
+                        <small class="form-text text-muted font-italic" id="dest-desc"></small>
+                    </div>
+
+                    <!-- NEW: Test & Save Buttons -->
+                    <div id="test-alert" class="alert d-none mt-3 mb-2 small font-weight-bold"></div>
+                    
+                    <div class="d-flex mt-4">
+                        <button type="button" id="btn-test-conn" class="btn btn-info mr-2 w-50" style="display: none;" onclick="testCredentials()">
+                            <i class="fas fa-network-wired mr-2"></i> Test Connection
+                        </button>
+                        
+                        <button type="submit" class="btn btn-success w-100" id="btn-save-sync">
+                            <i class="fas fa-save mr-2"></i> Save Configuration
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block footer %}
+<script>
+    // 1. Password Eye Toggle Logic
+    $('#togglePassword').click(function() {
+        const pwdInput = $('#sync_password'); // Make sure your WTForms password field has id="sync_password"
+        const icon = $('#togglePasswordIcon');
+        
+        if (pwdInput.attr('type') === 'password') {
+            pwdInput.attr('type', 'text');
+            icon.removeClass('fa-eye').addClass('fa-eye-slash');
+        } else {
+            pwdInput.attr('type', 'password');
+            icon.removeClass('fa-eye-slash').addClass('fa-eye');
+        }
+    });
+
+    // 2. Quick-select auto-fill for Local Mounts
+    $('#mount_quick_select').change(function() {
+        if($(this).val()) {
+            $('#destination_path_input').val($(this).val());
+        }
+    });
+
+    // 3. Dynamic UI Updating (Labels, Buttons, and Sections)
+    function updateFormUI() {
+        const rtype = $('#remote_type').val();
+        const destLabel = $('#dest-label');
+        const destDesc = $('#dest-desc');
+        
+        // Network vs Local vs Cloud logic
+        if (rtype === 'sftp' || rtype === 'ftp') {
+            $('#network-credentials').slideDown();
+            $('#local-mounts-box').slideUp();
+            $('#cloud-instructions-box').slideUp(); // Hide cloud instructions
+            
+            // Show Test Button, Shrink Save Button
+            $('#btn-test-conn').show();
+            $('#btn-save-sync').removeClass('w-100').addClass('w-50');
+            
+            destLabel.text('Destination Path (On Remote Server)');
+            destDesc.text('E.g., /home/user/backups or /var/www/data');
+            
+        } else if (rtype === 'local') {
+            $('#network-credentials').slideUp();
+            $('#local-mounts-box').slideDown();
+            $('#cloud-instructions-box').slideUp(); // Hide cloud instructions
+            
+            // Hide Test Button, Expand Save Button
+            $('#btn-test-conn').hide();
+            $('#btn-save-sync').removeClass('w-50').addClass('w-100');
+            
+            destLabel.text('Destination Folder (Local)');
+            destDesc.text('E.g., /media/pi/USB_Drive');
+            
+        } else { // 'advanced' (Cloud)
+            $('#network-credentials').slideUp();
+            $('#local-mounts-box').slideUp();
+            $('#cloud-instructions-box').slideDown(); // SHOW cloud instructions
+            
+            // Hide Test Button, Expand Save Button
+            $('#btn-test-conn').hide();
+            $('#btn-save-sync').removeClass('w-50').addClass('w-100');
+            
+            destLabel.text('Remote Cloud Profile & Path');
+            destDesc.text('E.g., MyGoogleDrive:/ChronoRootBackups');
+        }
+        
+        // Auto-sync interval logic
+        if ($('#sync_enabled').is(':checked')) {
+            $('#interval-group').fadeIn();
+        } else {
+            $('#interval-group').fadeOut();
+        }
+    }
+
+    // Bind the UI updater to changes and run once on load
+    $('#remote_type, #sync_enabled').change(updateFormUI);
+    $(document).ready(updateFormUI);
+
+    // 4. Test SSH/FTP Connection Logic
+    function testCredentials() {
+        const btn = $('#btn-test-conn');
+        const alertBox = $('#test-alert');
+        
+        const payload = {
+            remote_type: $('#remote_type').val(),
+            host: $('#host').val(),
+            port: $('#port').val(),
+            user: $('#user').val(),
+            password: $('#sync_password').val()
+        };
+
+        if (!payload.host || !payload.user || !payload.password) {
+            alertBox.removeClass('d-none alert-success alert-danger alert-info').addClass('alert-warning')
+                    .text('Please enter Host, Username, and Password first.');
+            return;
+        }
+
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-2"></i> Testing...');
+        alertBox.removeClass('d-none alert-success alert-danger alert-warning').addClass('alert-info')
+                .text('Reaching out to server...');
+
+        // UPDATED: Points to api.py
+        fetch("{{ url_for('api_exp.api_sync_test') }}", {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            btn.prop('disabled', false).html('<i class="fas fa-network-wired mr-2"></i> Test Connection');
+            if(data.result) {
+                alertBox.removeClass('alert-info alert-danger').addClass('alert-success').text(data.message);
+            } else {
+                alertBox.removeClass('alert-info alert-success').addClass('alert-danger').text(data.message || data.error);
+            }
+        })
+        .catch(err => {
+            btn.prop('disabled', false).html('<i class="fas fa-network-wired mr-2"></i> Test Connection');
+            alertBox.removeClass('alert-info').addClass('alert-danger').text("Failed to reach Flask backend.");
+        });
+    }
+
+    // 5. Trigger "Sync Now" Logic
+    function triggerManualSync() {
+        const btn = $('#btn-sync-now');
+        const text = $('#sync-state-text');
+        
+        btn.prop('disabled', true);
+        text.text('Initiating...');
+        
+        // UPDATED: Points to api.py
+        fetch("{{ url_for('api_exp.api_sync_trigger') }}", {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(res => res.json().then(data => ({status: res.status, ok: res.ok, body: data})))
+        .then(res => {
+            if(!res.ok || !res.body.result) {
+                showToast("Cannot start sync: " + (res.body.message || res.body.error || "Server Error"), "danger");
+                btn.prop('disabled', false);
+                text.text('Idle');
+            } else {
+                pollStatus();
+            }
+        })
+        .catch(err => {
+            showToast("Network Error", "danger");
+            btn.prop('disabled', false);
+            text.text('Idle');
+        });
+    }
+
+    // 6. Live Status Polling Logic
+    function pollStatus() {
+        fetch("{{ url_for('api_exp.get_system_status') }}")
+            .then(res => res.json())
+            .then(full_data => {
+                const data = full_data.sync; 
+                
+                const btnSync = $('#btn-sync-now');
+                const btnCancel = $('#btn-cancel-sync');
+                
+                const activityIcon = $('#sync-icon');
+                const activityText = $('#sync-activity-text');
+                const badge = $('#sync-enabled-badge');
+                
+                const resultIcon = $('#result-icon');
+                const resultText = $('#result-text');
+                const errorBox = $('#sync-error-box');
+                const errorText = $('#sync-error-text');
+
+                // --- 1. CURRENT ACTIVITY LOGIC ---
+                if (data.is_syncing) {
+                    // Hide Sync Button, Show Cancel Button
+                    btnSync.addClass('d-none');
+                    btnCancel.removeClass('d-none').prop('disabled', false).html('<i class="fas fa-stop mr-2"></i> Cancel Sync');
+                    
+                    activityIcon.html('<i class="fas fa-sync-alt fa-spin fa-3x text-primary"></i>');
+                    activityText.text(data.status_msg || 'Transferring Data...');
+                } else {
+                    // Show Sync Button, Hide Cancel Button
+                    btnCancel.addClass('d-none');
+                    btnSync.removeClass('d-none');
+                    {% if has_dest %} btnSync.prop('disabled', false); {% endif %}
+                    
+                    activityIcon.html('<i class="fas fa-cloud fa-3x text-info"></i>');
+                    
+                    // Display Standby vs Manual based on daemon config
+                    if (data.sync_enabled) {
+                        activityText.text('Standby (Auto-Sync ON)');
+                    } else {
+                        activityText.text('Manual Mode');
+                    }
+                }
+                
+                // --- 2. AUTO-SYNC BADGE ---
+                if (data.sync_enabled) {
+                    badge.removeClass('badge-secondary').addClass('badge-success').text('Auto: ON');
+                } else {
+                    badge.removeClass('badge-success').addClass('badge-secondary').text('Auto: OFF');
+                }
+
+                // --- 3. LATEST RESULT LOGIC ---
+                if (data.last_error) {
+                    resultIcon.html('<i class="fas fa-exclamation-circle text-danger fa-lg"></i>');
+                    resultText.text('Failed').removeClass('text-success').addClass('text-danger');
+                    errorBox.removeClass('d-none');
+                    errorText.text(data.last_error);
+                } else if (data.last_success) {
+                    resultIcon.html('<i class="fas fa-check-circle text-success fa-lg"></i>');
+                    resultText.text('Successful').removeClass('text-danger').addClass('text-success');
+                    errorBox.addClass('d-none');
+                } else {
+                    resultIcon.html('<i class="fas fa-minus-circle text-muted fa-lg"></i>');
+                    resultText.text('No Data Transferred').removeClass('text-success text-danger');
+                    errorBox.addClass('d-none');
+                }
+
+                // --- 4. TIMESTAMPS ---
+                if(data.last_success) {
+                    $('#sync-last-success').html('<i class="far fa-clock mr-1"></i> ' + data.last_success);
+                }
+                if(data.next_sync) {
+                    $('#sync-next-run').html('<i class="fas fa-forward mr-1"></i> ' + data.next_sync);
+                }
+            })
+            .catch(err => console.log("Status poll error:", err)); 
+    }
+
+    function cancelActiveSync() {
+        const btnCancel = $('#btn-cancel-sync');
+        const activityText = $('#sync-activity-text');
+        
+        // Instantly provide UI feedback
+        btnCancel.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-2"></i> Aborting...');
+        activityText.text('Sending Kill Signal...');
+        
+        fetch("{{ url_for('api_exp.api_sync_cancel') }}", {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(!data.result) {
+                showToast("Cannot cancel sync: " + (data.message || data.error || "Server Error"), "danger");
+                btnCancel.prop('disabled', false).html('<i class="fas fa-stop mr-2"></i> Cancel Sync');
+            }
+        })
+        .catch(err => {
+            showToast("Network Error while cancelling.", "danger");
+            btnCancel.prop('disabled', false).html('<i class="fas fa-stop mr-2"></i> Cancel Sync');
+        });
+    }
+
+    async function handleSyncSubmit(event) {
+        event.preventDefault(); 
+        
+        const btn = document.getElementById('btn-save-sync');
+        const form = document.getElementById('sync_setting_form');
+        const originalText = btn.innerHTML;
+        
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Checking State...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch("{{ url_for('api_exp.get_system_status') }}");
+            const data = await response.json();
+
+            const isLocked = data.lock_info.status !== 'FREE';
+            const isSyncing = data.sync.is_syncing;
+            let details = [];
+
+            if (isLocked) {
+                details.push(`Hardware is locked by '${data.lock_info.owner}'. Restarting the service now will orphan the background processes and leave the hardware permanently jammed.`);
+            }
+            if (isSyncing) {
+                details.push(`A data sync is actively running. We strongly recommend canceling the sync first to prevent file corruption.`);
+            }
+
+            if (details.length > 0) {
+                // REPLACED: await asyncConfirm
+                const forceReboot = await asyncConfirm(
+                    "System Busy",
+                    details.join('\n\n') + `\n\nDo you want to FORCE SAVE AND REBOOT the entire system instead? (A full reboot safely clears RAM locks and terminates transfers).`,
+                    true
+                );
+                
+                if (forceReboot) {
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Saving Config...';
+                    
+                    const formData = new FormData(form);
+                    await fetch(window.location.href, { method: 'POST', body: formData });
+                    
+                    btn.innerHTML = '<i class="fas fa-power-off mr-2"></i> Rebooting System...';
+                    await fetch("{{ url_for('api_exp.reboot') }}", { method: 'POST', headers: {'Content-Type': 'application/json'} });
+                    
+                    // REPLACED: showToast
+                    showToast("Configuration saved and system is rebooting. The interface will be unavailable for roughly 60 seconds.", "warning");
+                    return false;
+                } else {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                    return false;
+                }
+            }
+
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Saving...';
+            form.submit();
+
+        } catch (error) {
+            console.error("Failed to safely coordinate save/reboot", error);
+            // REPLACED: await asyncConfirm
+            const force = await asyncConfirm("Network Error", "Could not verify system safety state. Force save anyway?", true);
+            if (force) {
+                form.submit();
+            } else {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+        return false;
+    }
+
+    // Start the polling loop (every 2 seconds)
+    setInterval(pollStatus, 2000);
+</script>
+{% endblock %}

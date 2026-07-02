@@ -1,13 +1,77 @@
 {% extends "base.html" %}
+
 {% block title %}
-    {{ config.SITE_NAME }}
+    {{ config.SITE_NAME }} - Documentation
 {% endblock %}
-{% block header %}
+
+{% block head %}
+<style>
+    .doc-content h1, .doc-content h2 { border-bottom: 1px solid #eee; padding-bottom: 0.5rem; margin-top: 2rem; margin-bottom: 1rem; }
+    .doc-content h1 { font-size: 2rem; color: #343a40; }
+    .doc-content h2 { font-size: 1.5rem; color: #495057; }
+    .doc-content pre { background: #f8f9fa; padding: 1rem; border-radius: 5px; border: 1px solid #e9ecef; }
+    .doc-content code { color: #d63384; font-size: 0.9em; }
+    .doc-content pre code { color: #212529; }
+    .doc-content table { width: 100%; margin-bottom: 1rem; color: #212529; }
+    .doc-content table th, .doc-content table td { padding: 0.75rem; border-top: 1px solid #dee2e6; }
+    .doc-content table thead th { border-bottom: 2px solid #dee2e6; background-color: #f8f9fa;}
+</style>
 {% endblock %}
 
 {% block content %}
-  <h1 class="mt-5">{{ title }}</h1>
-  {{ content }}
-{% endblock %}
-{% block footer %}
+<div class="row mt-4 mb-5">
+    
+    <!-- LEFT SIDEBAR: Table of Contents -->
+    <div class="col-lg-3 mb-4">
+        <div class="card shadow-sm sticky-top" style="top: 20px;">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="fas fa-book mr-2"></i> Documentation</h5>
+            </div>
+            <div class="list-group list-group-flush">
+                <a href="{{ url_for('help_page.index', section='about') }}" 
+                   class="list-group-item list-group-item-action {% if current_section == 'about' %}active font-weight-bold{% endif %}">
+                   <i class="fas fa-info-circle mr-2"></i> About & References
+                </a>
+                
+                <a href="{{ url_for('help_page.index', section='manual') }}" 
+                   class="list-group-item list-group-item-action {% if current_section == 'manual' %}active font-weight-bold{% endif %}">
+                   <i class="fas fa-user-graduate mr-2"></i> User Manual
+                </a>
+                
+                <a href="{{ url_for('help_page.index', section='install') }}" 
+                   class="list-group-item list-group-item-action {% if current_section == 'install' %}active font-weight-bold{% endif %}">
+                   <i class="fas fa-download mr-2"></i> Installation Guide
+                </a>
+
+                <a href="{{ url_for('help_page.index', section='configuration') }}" 
+                   class="list-group-item list-group-item-action {% if current_section == 'configuration' %}active font-weight-bold{% endif %}">
+                   <i class="fas fa-cogs mr-2"></i> Configuration Guide
+                </a>
+                
+                <a href="{{ url_for('help_page.index', section='architecture') }}" 
+                   class="list-group-item list-group-item-action {% if current_section == 'architecture' %}active font-weight-bold{% endif %}">
+                   <i class="fas fa-sitemap mr-2"></i> App Architecture
+                </a>
+
+                <a href="{{ url_for('help_page.index', section='api') }}" 
+                   class="list-group-item list-group-item-action {% if current_section == 'api' %}active font-weight-bold{% endif %}">
+                   <i class="fas fa-plug mr-2"></i> REST API (Fleet)
+                </a>
+            </div>
+            <div class="card-footer bg-light text-center small text-muted">
+                ChronoRoot v2.0
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT CONTENT: Rendered Markdown -->
+    <div class="col-lg-9">
+        <div class="card shadow-sm">
+            <div class="card-body doc-content px-4 py-3">
+                {{ content }}
+            </div>
+        </div>
+    </div>
+
+</div>
 {% endblock %}

@@ -15,15 +15,66 @@ class Config(object):
     SITE_DESC = "A web interface to control a ChronoRoot module"
 
     WORKING_DIR = "/srv/ChronoRootData"
+    
+    # --- Camera & Multiplexer Hardware ---    
+    # Hardware multiplexer type. 
+    # Valid options: "SINGLE", "TYPE_QUAD2"
+    SELECTOR_TYPE = "SINGLE" 
+    
+    CAMS = (1, ) # CAMERAS PRESENCE & DISPOSITION
+                        # possible values (if we have ivport)
+                        # One cam :  (1, ), (2, ), (3, ), (4, )
+                        # Two cams : (1,2),(1,3),(1,4),(2,3),(2,4)
+                        # Three cams : (1,2,3),(1,2,4),(2,3,4)
+                        # Four cams : (1,2,3,4)
+                        # the order inside the list is not important
+    CAM_WARMUP = 5
+    CAM_ADJUST_TIME = 10
 
-    IVPORT_MODULE_PATH = "/root/ivport-v2"
-    SELECTOR_PRESENT = True # IVPORT MODULE PRESENCE
-    IVPORT_VERSION = 2
-    SELECTOR_TYPE = "TYPE_QUAD2" #possible values : TYPE_QUAD, TYPE_QUAD2, TYPE_DUAL, TYPE_DUAL2
-    CAMERA_TYPE = "RPICAM"
+    CAM_RETRIES = 10
+    CAM_WAIT_AFTER_RETRAY = 10
+    PER_CAMERA_ALLOWANCE = 5 # Minutes to wait per camera for an experiment to finish before flagging an alert. 
+
+    # --- HARDWARE PROFILES ---
+    CAMERA_TYPE = "RPICAM_V2" # Change to "RPICAM_V3" or "RPICAM_V3_WIDE" as needed
+
+    CAMERA_PROFILES = {
+        "RPICAM_V2": {
+            "name": "Raspberry Pi Camera Module V2",
+            "resolution": (3280, 2464),       # Native 4:3 max resolution
+            "stream_resolution": (800, 600),  # 4:3 streaming
+            "autofocus": False
+        },
+        "RPICAM_V3_V2COMP": {
+            "name": "Raspberry Pi Camera Module V3 (V2 compatible mode)",
+            "resolution": (3280, 2464),       
+            "stream_resolution": (800, 600),  
+            "autofocus": True
+        },
+        "RPICAM_V3": {
+            "name": "Raspberry Pi Camera Module V3",
+            "resolution": (4608, 2592),       # Native 16:9 max resolution
+            "stream_resolution": (800, 450),  # 16:9 streaming (prevents squishing)
+            "autofocus": True
+        },
+        "RPICAM_V3_WIDE": {
+            "name": "Raspberry Pi Camera Module V3 Wide",
+            "resolution": (4608, 2592),
+            "stream_resolution": (800, 450),
+            "autofocus": True
+        }
+    }
+    
+    KEEP_AUTOFOCUS = False
+    FOCUS_DISTANCES = {}
+    
+    # --- TIME & NETWORK DEFAULTS ---
+    USE_NTP = False
+    TIME_ZONE = "Europe/Paris"
+    NTP_SERVER = "pool.ntp.org"
 
     # Unified Date Format
-    DATE_FORMAT = '%Y-%m-%d_%H-%M-%S' 
+    DATE_FORMAT = '%Y-%m-%d_%H-%M-%S'
     PRETTY_FORMAT = '%Y-%m-%d %H:%M:%S' # For UI/Logs
     
     MULE_NO = 1
@@ -44,47 +95,72 @@ class Config(object):
     LOCK_FILE = "/tmp/cam.lock"
     LOCK_TIMEOUT = 5
 
-    CAMS = (1, 2, 3, 4) # CAMERAS PRESENCE & DISPOSITION
-                        # possible values:
-                        # One cam :  (1, ), (2, ), (3, ), (4, )
-                        # Two cams : (1,2),(1,3),(1,4),(2,3),(2,4)
-                        # Three cams : (1,2,3),(1,2,4),(2,3,4)
-                        # Four cams : (1,2,3,4)
-                        # the order inside the list is not important
-    CAM_WARMUP = 5
-    CAM_ADJUST_TIME = 10
-
-    CAM_RETRIES = 10
-    CAM_WAIT_AFTER_RETRAY = 10
-
     MAX_WAIT = 100 # time to wait to another experience to terminate, min 5
-    STREAM_RESOLUTION = (800, 600)
     IR_GPIO = 32
-    IR_WARM_UP = 10
+    IR_WARM_UP = 5
 
+    # Default capture parameters carried on each Experiment (Experiment.img_params).
+    # Picamera2 hardware controls now live in CAM_CAPTURE_PROFILES below. We do NOT
+    # pin a 'capture_profile' here: leaving it unset lets every capture fall back to
+    # the live DEFAULT_CAPTURE_PROFILE, so changing the active profile in the UI
+    # actually takes effect. Add 'capture_profile' to a specific call's params only
+    # if you need to override the default for that single capture.
     CAM_PARAMS = {
         "format" : 'png',
         'resize' : None, # (1280, 720)
-        'use_video_port' : False,
-        'iso' : '',
-        'awb_gains' : '', #(1.0,1.0)
-        'awb_mode' : 'auto', #('off', 'auto', 'sunlight', 'cloudy', 'shade', 'tungsten', 'fluorescent', 'incandescent', 'flash', 'horizon' )
-        'brightness' : 50, #(0 to 100)
-        'color_effects' : (128, 128), # rot B&W, default None
-        'contrast' : 0, # -100 to 100
-        'drc_strength' : 'off', # ('off', 'low', 'medium', 'high') <- PiCamera.DRC_STRENGTHS
-        'exposure_compensation' : 0, # -25 to 25
-        'exposure_mode' : 'backlight', #PiCamera.EXPOSURE_MODES <- posible values
-        'exposure_speed' : 0,
-        'flash_mode': 'off', # PiCamera.FLASH_MODES
-        'hflip' : False,
-        'image_denoise' : True,
-        'vflip' : False,
-        'image_effect' : 'none', # PiCamera.IMAGE_EFFECTS
-        'meter_mode' : 'average', #PiCamera.METER_MODES
-        'resolution' : (3280, 2464),
-        'saturation' : 0, # -100 to 100
-        'sharpness' : 0, # -100 to 100
-        'shutter_speed' : 0, # 0 -> auto, in µs
-        'zoom' : (0.0, 0.0, 1.0, 1.0)
     }
+
+    # --- PICAMERA2 CAPTURE PROFILES ---
+    # Named bundles of libcamera controls applied via picam2.set_controls() right
+    # before each capture. Select one per capture via params["capture_profile"];
+    # callers fall back to DEFAULT_CAPTURE_PROFILE when unset.
+    DEFAULT_CAPTURE_PROFILE = "backlight_manual"
+
+    CAM_CAPTURE_PROFILES = {
+        # IR backlight, fully manual: the sensor (behind a high-pass IR filter)
+        # only sees the IR backlight, so AE/AWB/denoise are locked to keep
+        # contrast and sharp root edges. Tune ExposureTime / AnalogueGain.
+        "backlight_manual": {
+            "grayscale": True,
+            "controls": {
+                "AeEnable": False,
+                "AwbEnable": False,
+                "ColourGains": (1.0, 1.0),  # neutral R/B so gray conversion is unbiased
+                "NoiseReductionMode": 0,    # off, preserve sharp root edges
+                "ExposureTime": 40000,      # µs, tune for your chamber
+                "AnalogueGain": 1.0,
+            },
+        },
+        # IR backlight, automatic: let AE/AWB run but keep denoise off so fine
+        # root edges are preserved. Output is still converted to grayscale.
+        "backlight_auto": {
+            "grayscale": True,
+            "controls": {
+                "AeEnable": True,
+                "AwbEnable": True,
+                "NoiseReductionMode": 0,    # off, preserve sharp root edges
+            },
+        },
+        # Visible light (IR filter physically removed): let libcamera run normally.
+        "color_auto": {
+            "grayscale": False,
+            "controls": {
+                "AeEnable": True,
+                "AwbEnable": True,
+                "NoiseReductionMode": 1,    # fast/standard
+            },
+        },
+    }
+
+    # When True, captures and the live preview request a square resolution
+    # (side x side, side = min(width, height)), so libcamera outputs a centered
+    # square crop. This removes the backlight visible at the sides of square
+    # plates. Cropping is done by resolution only (no ScalerCrop), as proven by
+    # the RPICAM_V3_V2COMP profile.
+    CROP_TO_SQUARE = False
+
+    # --- DATA SYNCHRONIZATION ---
+    SYNC_ENABLED = False
+    SYNC_MODE = 'copy'       # 'copy' (keep local) or 'move' (delete local after upload)
+    SYNC_DESTINATION = ''    # e.g., '/media/pi/usb_drive' OR 'my_remote:/backup'
+    SYNC_INTERVAL = 60       # Run every X minutes

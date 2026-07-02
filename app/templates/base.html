@@ -33,7 +33,9 @@
       </div>
     </footer>
     <script src="{{ url_for('static', filename='dist/main.js') }}"></script>
-
+    
+    {% include 'components/modals.html' %}
+    
     {% block footer %}{% endblock %}
   </body>
 </html>

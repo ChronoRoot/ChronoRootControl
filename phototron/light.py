@@ -30,7 +30,6 @@ class Light:
             GPIO.setmode(GPIO.BOARD)
         GPIO.setup(IR_GPIO , GPIO.OUT)
 
-
     @property
     def state(self):
         return GPIO.input(self.IR_GPIO)
@@ -39,14 +38,13 @@ class Light:
     def state(self, new_state):
         if new_state not in (GPIO.HIGH, GPIO.LOW):
             raise TypeError("Bas argument type")
-        if new_state != self.state:
-            #changestate
-            if GPIO.getmode() != GPIO.BOARD:
-                GPIO.setmode(GPIO.BOARD)
-            if GPIO.gpio_function(self.IR_GPIO) != GPIO.OUT:
-                GPIO.setup(self.IR_GPIO , GPIO.OUT)
-            GPIO.output(self.IR_GPIO, new_state)
-            #logger.info('IR swiched ON')
-            if Config.IR_WARM_UP != 0 :
-                time.sleep(Config.IR_WARM_UP)
-            return True
+        # Always drive the output. Reading back an output pin via GPIO.input()
+        # is unreliable across processes (mule vs web worker), so we never skip
+        # the write based on the read-back state.
+        if GPIO.getmode() != GPIO.BOARD:
+            GPIO.setmode(GPIO.BOARD)
+        if GPIO.gpio_function(self.IR_GPIO) != GPIO.OUT:
+            GPIO.setup(self.IR_GPIO , GPIO.OUT)
+        GPIO.output(self.IR_GPIO, new_state)
+
+        return True

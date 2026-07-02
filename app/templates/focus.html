@@ -1,14 +1,18 @@
 {% extends "base.html" %}
 {% block title %}
-    {{ config.SITE_NAME }}
+    {{ config.SITE_NAME }} - Focus
 {% endblock %}
 
 {% block content %}
-<h1 class="mt-5">Camera {{ cam_id }} preview</h1>
+<div class="d-flex justify-content-between align-items-center mt-5 mb-4">
+    <h1 class="m-0"><i class="fas fa-crosshairs mr-2 text-primary"></i>Camera {{ cam_id }} Tuning</h1>
+    <a href="{{ url_for('config_page.conf') }}" class="btn btn-danger">
+        <i class="fas fa-stop-circle mr-1"></i> Stop Preview & Release Lock
+    </a>
+</div>
 
-<div class="row mt-5">
-    <div class="col-lg-9">
-        
+<div class="row">
+    <div class="col-lg-8">
         {% if has_hw_error %}
             <div class="card border-danger shadow-sm">
                 <div class="card-body text-center p-5">
@@ -17,54 +21,246 @@
                     <p class="lead">The system reported a failure for <strong>Camera {{ cam_id }}</strong>.</p>
                     <div class="alert alert-secondary">Status: {{ cam_health }}</div>
                     <p class="text-muted">Check ribbon cables and power, then run a <strong>Hardware Diagnostic</strong>.</p>
-                    <a href="{{ url_for('config_page.conf') }}" class="btn btn-danger">Go to Diagnostics</a>
                 </div>
             </div>
-
         {% elif is_locked %}
             <div class="card border-warning shadow-sm">
                 <div class="card-body text-center p-5">
-                    <div class="text-warning mb-3">
-                        <i class="fas fa-lock fa-4x"></i>
-                    </div>
+                    <div class="text-warning mb-3"><i class="fas fa-lock fa-4x"></i></div>
                     <h3 class="card-title text-dark">Hardware Unavailable</h3>
-                    <p class="lead">
-                        The camera module is currently locked by: <br>
-                        <span class="badge badge-warning mt-2" style="font-size: 1rem;">
-                            {{ lock_owner }}
-                        </span>
-                    </p>
+                    <p class="lead">Locked by: <span class="badge badge-warning mt-2" style="font-size: 1rem;">{{ lock_owner }}</span></p>
                     <hr>
-                    <div class="text-muted text-left mx-auto" style="max_width: 500px;">
-                        <ul class="mb-4">
-                            <li>If an <strong>Experiment</strong> is running, please wait for it to finish.</li>
-                            <li>If this is another <strong>Browser Tab</strong> (or you just refreshed), please wait 5 seconds for the lock to release.</li>
-                        </ul>
-                    </div>
-                    
-                    <a href="{{ request.url }}" class="btn btn-warning btn-lg text-white">
+                    <p class="text-muted small">If an experiment is running, wait for it to finish. If you just refreshed, wait 5 seconds for the lock to release.</p>
+                    <a href="{{ request.url }}" class="btn btn-warning text-white mt-2">
                         <i class="fas fa-sync-alt mr-2"></i> Refresh Status
                     </a>
                 </div>
             </div>
+        {% else %}
+            <div class="card shadow-sm bg-dark p-1">
+                <img src="{{ url_for('focus_page.video_feed', cam_id=cam_id) }}" class="img-fluid rounded" style="width: 100%; min-height: 480px; object-fit: cover; background-color: #111;" alt="Live camera feed"/>
+            </div>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-4">
+        
+        <div class="card shadow-sm mb-4 border-info">
+            <div class="card-header bg-info text-white py-2">
+                <h6 class="m-0"><i class="fas fa-sun mr-2"></i>1. Environment</h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">Turn on the system lighting before focusing.</p>
+                {% include 'components/backlight.html' %} 
+            </div>
+        </div>
+
+        {% if has_autofocus %}
+        <div class="card shadow-sm mb-4 border-primary">
+            <div class="card-header bg-primary text-white py-2">
+                <h6 class="m-0"><i class="fas fa-search mr-2"></i>2. Digital Focus</h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">Adjust the lens motor until the agar plate is perfectly sharp.</p>
+                
+                <label for="focusSlider" class="form-label font-weight-bold">
+                    Lens Position: <span id="focusValue" class="text-primary">{{ saved_focus }}</span> diopters
+                </label>
+                
+                <input type="range" class="custom-range w-100" id="focusSlider" min="0.0" max="15.0" step="0.1" value="{{ saved_focus }}">
+                
+                <button class="btn btn-warning btn-sm mt-2 w-100" id="autoFocusBtn">
+                    <i class="fas fa-magic mr-1"></i> Auto-Focus Camera {{ cam_id }}
+                </button>
+
+                <button class="btn btn-success btn-sm mt-4 w-100" id="saveFocusBtn">
+                    <i class="fas fa-save mr-1"></i> Save Focus for Camera {{ cam_id }}
+                </button>
+
+                <div id="focusErrorDisplay" class="alert alert-danger mt-3 mb-0 p-2 text-center" style="display: none; font-size: 0.85rem;">
+                </div>
+            </div>
+        </div>
+
 
         {% else %}
-            <div class="card shadow-sm bg-dark">
-                <img src="{{ url_for('focus_page.video_feed', cam_id=cam_id) }}" class="img-fluid rounded" style="width: 100%; min-height: 480px; background-color: #000;"/>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-light py-2">
+                <h6 class="m-0"><i class="fas fa-sliders-h mr-2"></i>2. Manual Focus</h6>
             </div>
+            <div class="card-body">
+                <p class="small text-muted mb-0">
+                    Use the live feed on the left to physically adjust the lens dial. 
+                </p>
+            </div>
+        </div>
+
         {% endif %}
 
     </div>
-
-    <div class="col-lg-3">
-        {% include 'components/backlight.html' %}
-        
-        <div class="mt-3">
-             <a href="{{ url_for('config_page.conf') }}" class="btn btn-outline-secondary btn-block">
-                <i class="fas fa-arrow-left"></i> Back to Config
-            </a>
-        </div>
-    </div>
 </div>
 
+{% if has_autofocus %}
+<script>
+    const focusSlider = document.getElementById('focusSlider');
+    const focusValueDisplay = document.getElementById('focusValue');
+    const saveFocusBtn = document.getElementById('saveFocusBtn');
+    const camId = {{ cam_id }};
+    
+    // THE FIX: Let Flask generate the absolute perfect path for this blueprint route
+    const liveFocusUrl = "{{ url_for('focus_page.set_live_focus', cam_id=cam_id) }}";
+    
+    let debounceTimer;
+
+    // 1. Live Update (Debounced)
+    focusSlider.addEventListener('input', function() {
+        const val = this.value;
+        focusValueDisplay.textContent = val;
+        
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            
+            console.log(`Sending focus value ${val} to ${liveFocusUrl}...`); // PROOF OF LIFE
+            
+            fetch(liveFocusUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ focus_value: val })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    console.error(`HTTP Error! Status: ${response.status} - The URL might be wrong.`);
+                } else {
+                    console.log("Server acknowledged live focus update.");
+                }
+            })
+            .catch(err => console.error("Network failure sending live focus", err));
+            
+        }, 150); 
+    });
+
+    // 2. Save Configuration
+    saveFocusBtn.addEventListener('click', function() {
+        const val = focusSlider.value;
+        const originalText = this.innerHTML;
+        const errorDisplay = document.getElementById('focusErrorDisplay');
+        
+        errorDisplay.style.display = 'none';
+        errorDisplay.innerText = '';
+        this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        this.disabled = true;
+
+        fetch(`/api/camera/${camId}/focus`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ focus_value: val })
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || `HTTP Error: ${response.status}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if(data.result) {
+                this.className = "btn btn-outline-success btn-sm mt-4 w-100";
+                this.innerHTML = '<i class="fas fa-check mr-1"></i> Saved!';
+                setTimeout(() => {
+                    this.className = "btn btn-success btn-sm mt-4 w-100";
+                    this.innerHTML = originalText;
+                    this.disabled = false;
+                }, 2000);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            this.innerHTML = '<i class="fas fa-times mr-1"></i> Failed';
+            this.className = "btn btn-danger btn-sm mt-4 w-100";
+            
+            errorDisplay.innerText = err.message;
+            errorDisplay.style.display = 'block';
+
+            setTimeout(() => {
+                this.className = "btn btn-success btn-sm mt-4 w-100";
+                this.innerHTML = originalText;
+                this.disabled = false;
+            }, 3000);
+        });
+    });
+
+    // 3. Trigger Auto-Focus
+    const autoFocusBtn = document.getElementById('autoFocusBtn');
+    
+    // Jinja will securely build the exact route for the blueprint
+    const runAutoFocusUrl = "{{ url_for('focus_page.run_autofocus', cam_id=cam_id) }}";
+
+    if (autoFocusBtn) {
+        autoFocusBtn.addEventListener('click', function() {
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Sweeping Focus...';
+            this.disabled = true;
+            focusSlider.disabled = true;
+            saveFocusBtn.disabled = true;
+            
+            console.log(`Sending autofocus command to: ${runAutoFocusUrl}`);
+
+            // CRITICAL: Notice we pass the variable runAutoFocusUrl here, NOT a hardcoded string
+            fetch(runAutoFocusUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP Error ${response.status}: Ensure Flask was restarted.`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if(data.success) {
+                    const newFocus = data.lens_position.toFixed(1);
+                    focusSlider.value = newFocus;
+                    focusValueDisplay.textContent = newFocus;
+                    
+                    this.innerHTML = '<i class="fas fa-check mr-1"></i> Focus Found!';
+                    this.className = "btn btn-success btn-sm mt-2 w-100";
+                    
+                    // Click the save button to push to config
+                    saveFocusBtn.click();
+                    
+                    setTimeout(() => {
+                        this.innerHTML = originalText;
+                        this.className = "btn btn-warning btn-sm mt-2 w-100";
+                        this.disabled = false;
+                        focusSlider.disabled = false;
+                        saveFocusBtn.disabled = false;
+                    }, 3000);
+                } else {
+                    throw new Error(data.error);
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                this.innerHTML = '<i class="fas fa-times mr-1"></i> AF Failed';
+                this.className = "btn btn-danger btn-sm mt-2 w-100";
+                
+                const errorDisplay = document.getElementById('focusErrorDisplay');
+                errorDisplay.innerText = err.message;
+                errorDisplay.style.display = 'block';
+
+                setTimeout(() => {
+                    this.innerHTML = originalText;
+                    this.className = "btn btn-warning btn-sm mt-2 w-100";
+                    this.disabled = false;
+                    focusSlider.disabled = false;
+                    saveFocusBtn.disabled = false;
+                    errorDisplay.style.display = 'none';
+                }, 4000);
+            });
+        });
+    }
+</script>
+{% endif %}
 {% endblock %}

@@ -3,7 +3,7 @@
   "version": "1.4.0",
   "description": "A web interface to control a module of the ChronoRoot robot build",
   "main": "src/main.js",
-  "repository": "https://github.com/ThomasBlein/ChronoRootControl",
+  "repository": "https://github.com/ChronoRoot/ChronoRootControl",
   "scripts": {
     "start": "yarn run build",
     "build": "parcel build app/static/src/main.js -d app/static/dist --public-url .",

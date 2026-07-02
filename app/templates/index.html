@@ -1,208 +1,584 @@
 {% extends "base.html" %}
 
 {% block title %}
-    {{ config.SITE_NAME }} - Dashboard
-{% endblock %}
-
-{% block header %}
-    <link href="{{ url_for('static', filename='css/vis-timeline-graph2d.min.css') }}" rel="stylesheet" type="text/css" />
-    
-    <style>
-        /* Base styling for timeline items */
-        .vis-item { 
-            border-color: transparent; 
-            font-size: 10pt; 
-            box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
-        }
-        /* Specific style for the 'NOW' marker */
-        .vis-item.status-NOW { 
-            background-color: #ffc107 !important; 
-            color: black !important; 
-            opacity: 0.6;
-            z-index: 0; 
-        }
-        /* Custom label styling */
-        .vis-label { font-weight: bold; color: #555; }
-
-        /* Server time marker (Red Line) */
-        .vis-item.server-time-line {
-            background-color: transparent !important;
-            border-left: 2px solid #FF0000;
-            width: 0 !important;
-            z-index: 9999;
-            pointer-events: none;
-        }
-    </style>
+    {{ config.SITE_NAME }} - Command Center
 {% endblock %}
 
 {% block content %}
-    <h1 class="mt-5">{{ config.SITE_NAME }}</h1>
-    <p class="lead text-muted">{{ config.SITE_DESC }}</p>
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="sub-header mb-0">Experiments List</h2>
+{# --- Group Experiments by Status --- #}
+{% set running_exps = [] %}
+{% set queued_exps = [] %}
+{% set archived_exps = [] %}
+
+{% for exp in exps.exps %}
+    {% if exp.status in ['RUNNING', 'ERROR'] or (exp.status in ['NEW', 'DIAGNOSTICS', 'SCHEDULED'] and exp.start <= now) %}
+        {% if running_exps.append(exp) %}{% endif %}
+    {% elif exp.status in ['NEW', 'SCHEDULED'] %}
+        {% if queued_exps.append(exp) %}{% endif %}
+    {% else %}
+        {% if archived_exps.append(exp) %}{% endif %}
+    {% endif %}
+{% endfor %}
+
+<div id="dashboard-container">
+
+    <!-- ==========================================
+         TOP BANNER: IDENTITY & ALERTS
+         ========================================== -->
+    <div class="d-flex justify-content-between align-items-center mt-4 mb-4 border-bottom pb-3">
         <div>
-            <a role="button" class="btn btn-success shadow-sm" aria-label="New experiment" href="{{url_for('experiment_page.new_experiment')}}">
-                <i class="fas fa-plus-circle mr-2"></i>New Experiment
-            </a>
-            <a href="{{url_for('api_exp.get_experiment_list') }}" class="btn btn-outline-secondary btn-sm ml-2" title="Export List JSON">
-                <i class="fas fa-code"></i>
+            <h1 class="h2 mb-1 text-dark">
+                <i class="fas fa-robot text-secondary mr-2"></i>{{ config.SITE_NAME }}
+            </h1>
+            <div class="text-muted font-weight-bold ml-1">
+                <i class="fas fa-network-wired mr-1"></i> {{ hostname|default('chronoroot') }} ({{ sys_info.identity.ip }})
+            </div>
+        </div>
+        <div>
+            <a role="button" class="btn btn-success shadow-sm font-weight-bold" href="{{url_for('experiment_page.new_experiment')}}">
+                <i class="fas fa-plus mr-2"></i>New Experiment
             </a>
         </div>
     </div>
 
-    <div class="table-responsive card shadow-sm">
-        <table class="table tablesorter table-hover mb-0" id="experiment_list">
-            <thead class="thead-light">
-                <tr>
-                    <th>Experiment ID</th>
-                    <th>Status</th>
-                    <th>Start Date</th>
-                    <th>End Date</th>
-                    <th>Interval</th>
-                    <th>Next Image</th>
-                    <th class="text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for exp in exps.exps %}
-                
-                {# Row Coloring logic #}
-                {% if exp.status == "FINISHED" %}
-                    {% set row_class = "table-success" %}
-                {% elif exp.status == "CANCELLED" %}
-                    {% set row_class = "table-warning" %}
-                {% elif exp.status == "ERROR" %}
-                    {% set row_class = "table-danger" %}
-                {% elif exp.status == "RUNNING" %}
-                    {% set row_class = "" %}
-                {% else %}
-                    {% set row_class = "table-info" %}
-                {% endif %}
-
-                <tr class="{{ row_class }} clickable-row" style="cursor: pointer;" data-href="{{url_for('experiment_page.setuped_experiment', expid=exp.expid) }}">
-                    <th scope="row" class="align-middle">
-                        {% if exp.status == "RUNNING" %}
-                            <i class="fas fa-circle text-success small mr-1"></i>
-                        {% endif %}
-                        {{exp.expid}}
-                    </th>
-                    <td class="align-middle">
-                        {% if exp.status == 'FINISHED' %}Finished
-                        {% elif exp.status == 'CANCELLED' %}Cancelled
-                        {% else %}{{exp.status}}
-                        {% endif %}
-                    </td>
-                    
-                    {# Use strftime for clean table formatting #}
-                    <td class="align-middle">{{exp.start.strftime('%Y/%m/%d %H:%M')}}</td>
-                    <td class="align-middle">{{exp.end.strftime('%Y/%m/%d %H:%M')}}</td>
-                    
-                    <td class="align-middle">{{exp.interval}} min</td>
-                    <td class="align-middle small">{{exp.next_run_time}}</td>
-                    <td class="text-right align-middle">
-                        <object>
-                            <a href="{{url_for('api_exp.get_experiment', expid=exp.expid) }}" class="btn btn-sm btn-light border" title="View JSON">
-                                <i class="fas fa-code text-muted"></i>
-                            </a>
-                        </object>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div id="system-alert-box" class="alert alert-danger shadow-sm border-left-strong mb-4 {% if not sys_info.alerts.has_warnings %}d-none{% endif %}" role="alert">
+        <h5 class="alert-heading font-weight-bold"><i class="fas fa-exclamation-triangle mr-2"></i>System Attention Required</h5>
+        <ul class="mb-0" id="system-alert-list">
+            {% for issue in sys_info.alerts.issues %}
+                <li>{{ issue }}</li>
+            {% endfor %}
+        </ul>
     </div>
 
-    <div class="card shadow-sm mb-4">
-        <div class="card-body">
-            {# The Visualization Container #}
-            <div id="visualization" style="height: 350px; width: 100%;"></div>
-            
-            <div class="text-right mt-2 small text-muted">
-                <i class="fas fa-info-circle"></i> Timeline uses Server Time: <strong>{{ now }}</strong>
+    <!-- ==========================================
+         SECTION 1: SYSTEM VITALS (4 Cards)
+         ========================================== -->
+    <div class="row mb-4">
+        
+        <!-- Vitals 1: Server Time & Global Next Picture -->
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card shadow-sm h-100 border-primary">
+                <div class="card-body">
+                    <h6 class="text-uppercase text-muted small font-weight-bold mb-2"><i class="far fa-clock mr-1"></i> System Time</h6>
+                    <h4 class="mb-2 text-dark font-weight-bold" id="global-clock">
+                        Loading...
+                    </h4>
+                    <div class="progress" style="height: 6px;">
+                        <div class="progress-bar bg-primary" style="width: 100%;"></div>
+                    </div>
+                    <small class="text-muted mt-2 d-block text-truncate">
+                        <strong>Next Action:</strong> 
+                        <span id="vital-next-action" class="{% if sys_info.next_picture and sys_info.next_picture != 'None' %}text-primary font-weight-bold{% endif %}">
+                            {% if sys_info.next_picture and sys_info.next_picture != 'None' %}{{ sys_info.next_picture }}{% else %}None scheduled{% endif %}
+                        </span>
+                    </small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vitals 2: Hardware Status -->
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card shadow-sm h-100 border-{% if sys_info.lock_info.status == 'FREE' %}success{% else %}warning{% endif %}">
+                <div class="card-body">
+                    <h6 class="text-uppercase text-muted small font-weight-bold mb-2"><i class="fas fa-microchip mr-1"></i> Hardware</h6>
+                    {% set lock = sys_info.lock_info %}
+                    {% if lock.status == 'FREE' %}
+                        <h4 class="mb-2 text-success font-weight-bold"><i class="fas fa-check-circle"></i> Ready</h4>
+                    {% else %}
+                        <h4 class="mb-2 text-warning font-weight-bold"><i class="fas fa-lock"></i> Busy</h4>
+                    {% endif %}
+                    
+                    <div class="progress" style="height: 6px;">
+                        <div class="progress-bar {% if lock.status == 'FREE' %}bg-success{% else %}bg-warning progress-bar-striped progress-bar-animated{% endif %}" style="width: 100%;"></div>
+                    </div>
+
+                    <div class="mt-2 small text-muted">
+                        {% if lock.status != 'FREE' %}
+                            <div class="d-flex justify-content-between border-bottom pb-1 mb-1">
+                                <span class="font-weight-bold">Status:</span>
+                                <span class="text-dark">Hardware Locked</span>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <span class="font-weight-bold">Owner:</span>
+                                <span class="text-truncate text-dark" style="max-width: 60%;" title="{{ lock.owner }}">{{ lock.owner }}</span>
+                            </div>
+                        {% else %}
+                            {# 1. Calculate Camera Health #}
+                            {% set total_cams = sys_info.cam_reports|length %}
+                            {% set ok_cams = namespace(count=0) %}
+                            {% for cam_id, c_data in sys_info.cam_reports.items() %}
+                                {% if c_data.health == 'OK' %}{% set ok_cams.count = ok_cams.count + 1 %}{% endif %}
+                            {% endfor %}
+                            
+                            {# 2. Get Light Health #}
+                            {% set lights = sys_info.lights_info | default({}) %}
+                            {% set l_status = lights.get('health_check', {}).get('status', 'UNTESTED') %}
+                            
+                            {# 3. Display Two-Row Telemetry #}
+                            <div class="d-flex justify-content-between border-bottom pb-1 mb-1">
+                                <span class="font-weight-bold">Cameras:</span>
+                                <span class="{% if total_cams > 0 and ok_cams.count < total_cams %}text-danger font-weight-bold{% else %}text-dark{% endif %}">
+                                    {{ ok_cams.count }} of {{ total_cams }} Online
+                                </span>
+                            </div>
+                            
+                            <div class="d-flex justify-content-between">
+                                <span class="font-weight-bold">IR Lights:</span>
+                                <span class="{% if l_status == 'OK' %}text-success font-weight-bold{% elif l_status == 'NOT DETECTED' %}text-danger font-weight-bold{% else %}text-muted{% endif %}">
+                                    {% if l_status == 'OK' %}OK
+                                    {% elif l_status == 'NOT DETECTED' %}Not Detected
+                                    {% else %}Untested{% endif %}
+                                </span>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vitals 3: Storage -->
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card shadow-sm h-100 border-info">
+                <div class="card-body">
+                    <h6 class="text-uppercase text-muted small font-weight-bold mb-2"><i class="fas fa-hdd mr-1"></i> Storage</h6>
+                    {% set storage = sys_info.system_health.storage %}
+                    <h4 id="vital-storage-free" class="mb-2 {% if storage.percent_used > 90 %}text-danger{% else %}text-dark{% endif %} font-weight-bold">
+                        {{ storage.free_gb }} GB Free
+                    </h4>
+                    <div class="progress" style="height: 6px;">
+                        <div id="vital-storage-bar" class="progress-bar {% if storage.percent_used > 90 %}bg-danger{% else %}bg-info{% endif %}" style="width: {{ storage.percent_used }}%;"></div>
+                    </div>
+                    <small id="vital-storage-detail" class="text-muted mt-2 d-block">{{ storage.percent_used }}% Used of {{ storage.total_gb }} GB</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vitals 4: Cloud Sync -->
+        <div class="col-xl-3 col-md-6 mb-3">
+            <div class="card shadow-sm h-100 border-secondary">
+                <div class="card-body">
+                    <h6 class="text-uppercase text-muted small font-weight-bold mb-2"><i class="fas fa-cloud-upload-alt mr-1"></i> Cloud Sync</h6>
+                    {% set sync = sys_info.sync %}
+                    <div id="vital-sync-body">
+                    {% if not sync.sync_enabled %}
+                        <h4 class="mb-2 text-muted font-weight-bold"><i class="fas fa-ban"></i> Disabled</h4>
+                        <div class="progress" style="height: 6px;"><div class="progress-bar bg-secondary" style="width: 100%;"></div></div>
+                        <small class="text-muted mt-2 d-block">Network transfers off</small>
+                    {% elif sync.is_syncing %}
+                        <h4 class="mb-2 text-primary font-weight-bold"><i class="fas fa-sync-alt fa-spin"></i> Syncing</h4>
+                        <div class="progress" style="height: 6px;"><div class="progress-bar bg-primary progress-bar-striped progress-bar-animated" style="width: 100%;"></div></div>
+                        <small class="text-muted mt-2 d-block text-truncate">{{ sync.status_msg }}</small>
+                    {% else %}
+                        <h4 class="mb-2 text-success font-weight-bold"><i class="fas fa-check"></i> Idle</h4>
+                        <div class="progress" style="height: 6px;"><div class="progress-bar bg-success" style="width: 100%;"></div></div>
+                        <small class="text-muted mt-2 d-block text-truncate">Success: {{ sync.last_success or 'Never' }}</small>
+                    {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
+    <!-- ==========================================
+         SECTION 2: ACTIVE OPERATIONS
+         ========================================== -->
+    <h4 class="mb-3 text-secondary border-bottom pb-2"><i class="fas fa-play-circle mr-2"></i>Active Operations</h4>
+    
+    <div class="row mb-5">
+        {% if running_exps|length == 0 %}
+            <div class="col-12">
+                <div class="alert alert-light text-center border shadow-sm py-4">
+                    <i class="fas fa-bed fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">System Idle</h5>
+                    <p class="mb-0 text-muted">No experiments are currently running. Create a new one or wait for a scheduled start.</p>
+                </div>
+            </div>
+        {% else %}
+            {% for exp in running_exps %}
+            
+            {% set job_ram = sys_info.jobs.get(exp.expid) %}
+            {% set is_errored = exp.status == 'ERROR' %}
+            {% set is_actively_capturing = (sys_info.lock_info.status == 'LOCKED' and exp.expid in sys_info.lock_info.details|default('')) %}
+            
+            <div class="col-lg-6 mb-4" data-job-id="{{ exp.expid }}">
+                <div class="card shadow border-{% if is_errored %}danger{% else %}info{% endif %} h-100">
+                    <div class="card-header bg-{% if is_errored %}danger{% else %}info{% endif %} text-white d-flex justify-content-between align-items-center py-2">
+                        <h5 class="mb-0 font-weight-bold text-truncate" title="{{ exp.expid }}">{{ exp.name or exp.expid }}</h5>
+                        {% if is_errored %}
+                        <span class="badge badge-light text-danger"><i class="fas fa-exclamation-triangle fa-pulse"></i> ERROR</span>
+                        {% else %}
+                        <span class="badge badge-light text-info"><i class="fas fa-sync-alt fa-spin"></i> RUNNING</span>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="card-body">
+                        {% if is_errored and exp.message %}
+                        <div class="alert alert-danger py-2 small mb-3 border-danger">
+                            <i class="fas fa-exclamation-circle mr-1"></i>
+                            <strong>This experiment has encountered errors.</strong>
+                            <div class="mt-1">{{ exp.message }}</div>
+                            {% if sys_info.watchdog and sys_info.watchdog.reboots_last_6h > 0 %}
+                            <div class="mt-1 text-muted">System reboots in last 6 hours: {{ sys_info.watchdog.reboots_last_6h }} / {{ sys_info.watchdog.reboot_limit }}</div>
+                            {% endif %}
+                            {% if sys_info.watchdog and sys_info.watchdog.limit_reached %}
+                            <div class="mt-1 text-warning font-weight-bold">Auto-reboot limit reached — manual intervention required.</div>
+                            {% endif %}
+                            {% if sys_info.camera_gaps %}
+                                {% for gap in sys_info.camera_gaps %}
+                                    {% if gap.expid == exp.expid %}
+                            <div class="mt-1 small">Camera {{ gap.cam }} is {{ gap.behind_by }} pictures behind schedule.</div>
+                                    {% endif %}
+                                {% endfor %}
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        <!-- Timeline Row -->
+                        <div class="row mb-3 bg-light py-2 rounded mx-0 border">
+                            <div class="col-4">
+                                <small class="text-muted text-uppercase font-weight-bold">Start</small><br>
+                                <span class="font-weight-bold">{{ exp.start.strftime('%b %d, %H:%M') }}</span>
+                            </div>
+                            <div class="col-4 border-left">
+                                <small class="text-muted text-uppercase font-weight-bold">Ends</small><br>
+                                <span class="font-weight-bold">{{ exp.end.strftime('%b %d, %H:%M') }}</span>
+                            </div>
+                            <div class="col-4 border-left">
+                                <small class="text-muted text-uppercase font-weight-bold">Interval</small><br>
+                                <span class="font-weight-bold">{{ exp.interval }} min</span>
+                            </div>
+                        </div>
+
+                        <!-- Progress Section -->
+                        {% if job_ram and job_ram.progress %}
+                            {% set prog = job_ram.progress %}
+                            
+                            <!-- FIRST PICTURE LOGIC -->
+                            {% if exp.status == 'DIAGNOSTICS' %}
+                                <div class="alert alert-info py-2 small text-center mb-3 border-info font-weight-bold text-dark">
+                                    <i class="fas fa-microchip fa-pulse mr-1"></i> Scanning hardware...
+                                </div>
+                            {% elif prog.taken == 0 and not is_errored %}
+                                <div class="alert alert-warning py-2 small text-center mb-3 border-warning font-weight-bold text-dark">
+                                    <i class="fas fa-hourglass-half fa-spin mr-1"></i> Awaiting first scheduled capture...
+                                </div>
+                            {% elif is_errored %}
+                                {% set percent = (prog.taken / prog.expected * 100) | round(1) if prog.expected > 0 else 0 %}
+                                <div class="d-flex justify-content-between small font-weight-bold mb-1">
+                                    <span class="text-muted text-uppercase">Progress</span>
+                                    <span data-job-progress-text>{{ prog.taken }} / {{ prog.expected }} ({{ percent }}%)</span>
+                                </div>
+                                <div class="progress mb-3" style="height: 10px;">
+                                    <div class="progress-bar bg-danger progress-bar-striped progress-bar-animated" data-job-progress-bar style="width: {{ percent }}%;"></div>
+                                </div>
+                                <div class="alert alert-warning py-1 small text-center mb-3 border-warning">
+                                    <i class="fas fa-redo mr-1"></i> Awaiting next scheduled capture
+                                </div>
+                            {% else %}
+                                {% set percent = (prog.taken / prog.expected * 100) | round(1) if prog.expected > 0 else 0 %}
+                                <div class="d-flex justify-content-between small font-weight-bold mb-1">
+                                    <span class="text-muted text-uppercase">Progress</span>
+                                    <span data-job-progress-text>{{ prog.taken }} / {{ prog.expected }} ({{ percent }}%)</span>
+                                </div>
+                                <div class="progress mb-3" style="height: 10px;">
+                                    <div class="progress-bar {% if is_errored %}bg-danger{% else %}bg-info{% endif %} progress-bar-striped progress-bar-animated" data-job-progress-bar style="width: {{ percent }}%;"></div>
+                                </div>
+                            {% endif %}
+                            
+                            <!-- DYNAMIC HARDWARE / COUNTDOWN ROW -->
+                            <div class="p-2 border rounded {% if is_actively_capturing %}bg-warning border-warning{% else %}bg-white{% endif %}">
+                                {% if is_actively_capturing %}
+                                    
+                                    {# Find exactly which camera is firing right now from RAM state #}
+                                    {% set active_cam = namespace(id=None) %}
+                                    {% for cam_id, data in sys_info.cam_reports.items() %}
+                                        {% if data.get('activity', 'IDLE') == 'CAPTURING' %}
+                                            {% set active_cam.id = cam_id %}
+                                        {% endif %}
+                                    {% endfor %}
+
+                                    <div class="d-flex align-items-center font-weight-bold text-dark">
+                                        <i class="fas fa-camera fa-pulse fa-lg mr-3"></i> 
+                                        <div>
+                                            <div>Capturing image 
+                                                {% if active_cam.id %}<span class="badge badge-dark ml-1">Cam {{ active_cam.id }}</span>{% endif %}
+                                            </div>
+                                            <div class="small mt-1">
+                                                <i class="fas fa-lightbulb {% if exp.ir %}text-danger{% else %}text-secondary{% endif %}"></i> 
+                                                IR Lights: {% if exp.ir %}ON{% else %}OFF{% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                {% elif exp.status == 'DIAGNOSTICS' %}
+                                    <div class="d-flex justify-content-center align-items-center text-info font-weight-bold my-1">
+                                        <i class="fas fa-cogs fa-spin mr-2"></i> Analyzing system components...
+                                    </div>
+                                {% else %}
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="text-muted small text-uppercase font-weight-bold">Next Capture:</span>
+                                        <span class="font-weight-bold text-{% if is_errored %}danger{% else %}info{% endif %}">
+                                            <span class="countdown-timer" data-time="{{ job_ram.next_run_time or '' }}">Calculating...</span>
+                                        </span>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% else %}
+                            <div class="alert alert-secondary py-2 small text-center mb-0">Initializing tracking...</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="card-footer bg-light d-flex justify-content-between py-2">
+                        <a href="{{ url_for('experiment_page.setuped_experiment', expid=exp.expid) }}" class="btn btn-sm btn-primary font-weight-bold">
+                            <i class="fas fa-sliders-h mr-1"></i> Dashboard
+                        </a>
+                        <a href="{{ url_for('storage_page.browse', subpath=exp.expid) }}" class="btn btn-sm btn-outline-secondary">
+                            <i class="fas fa-folder-open mr-1"></i> Data
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <!-- ==========================================
+         SECTION 3: THE QUEUE (SCHEDULED)
+         ========================================== -->
+    {% if queued_exps|length > 0 %}
+    <h4 class="mb-3 text-secondary border-bottom pb-2"><i class="far fa-clock mr-2"></i>Up Next (Queue)</h4>
+    <div class="card shadow-sm mb-5">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th>Experiment</th>
+                        <th>Starts</th>
+                        <th>Ends</th>
+                        <th>Interval</th>
+                        <th class="text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exp in queued_exps|sort(attribute='start') %}
+                    <tr>
+                        <td class="align-middle font-weight-bold">{{ exp.name or exp.expid }}</td>
+                        <td class="align-middle text-primary"><strong>{{ exp.start.strftime('%Y-%m-%d %H:%M') }}</strong></td>
+                        <td class="align-middle">{{ exp.end.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="align-middle">{{ exp.interval }}m</td>
+                        <td class="align-middle text-right">
+                            <a href="{{ url_for('experiment_page.setuped_experiment', expid=exp.expid) }}" class="btn btn-sm btn-outline-warning text-dark">
+                                <i class="fas fa-edit"></i> Edit
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ==========================================
+         SECTION 4: THE ARCHIVE
+         ========================================== -->
+    <h4 class="mb-3 text-secondary border-bottom pb-2"><i class="fas fa-archive mr-2"></i>Archive</h4>
+    <div class="card shadow-sm mb-4">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="thead-light">
+                    <tr>
+                        <th class="pl-3">Status</th>
+                        <th>Experiment ID</th>
+                        <th>Started</th>
+                        <th>Finished / Ended</th>
+                        <th class="text-right pr-3">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for exp in archived_exps|sort(attribute='end', reverse=True) %}
+                    <tr>
+                        <td class="align-middle pl-3">
+                            {% if exp.status == 'FINISHED' %}<span class="badge badge-success">Finished</span>
+                            {% elif exp.status == 'CANCELLED' %}<span class="badge badge-warning">Cancelled</span>
+                            {% else %}<span class="badge badge-secondary">{{ exp.status }}</span>{% endif %}
+                        </td>
+                        <td class="align-middle font-weight-bold">{{ exp.expid }}</td>
+                        <td class="align-middle text-muted">{{ exp.start.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="align-middle text-muted">{{ exp.end.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="align-middle text-right pr-3">
+                            <a href="{{ url_for('experiment_page.setuped_experiment', expid=exp.expid) }}" class="btn btn-sm btn-light border mr-1" title="View details">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                            <a href="{{ url_for('storage_page.browse', subpath=exp.expid) }}" class="btn btn-sm btn-outline-primary" title="Browse files">
+                                <i class="fas fa-folder-open"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-3">No archived experiments found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div> <!-- End Dashboard Container -->
 {% endblock %}
 
 {% block footer %}
-    <script>
-        $(function(){ $("#experiment_list").tablesorter({ sortList: [[2,1]] }); });
-        jQuery(document).ready(function($) {
-            $(".clickable-row").click(function() { window.document.location = $(this).data("href"); });
+<script>
+    // Safe initialization of Server Time from Python template
+    let serverTimeStr = "{{ now.strftime('%Y-%m-%dT%H:%M:%S') }}";
+    let remoteTime = new Date(serverTimeStr).getTime(); 
+    if (isNaN(remoteTime)) { remoteTime = Date.now(); }
+
+    function updateLiveClocks() {
+        remoteTime += 1000; // Tick +1 second
+        
+        let displayDate = new Date(remoteTime);
+        let timeOptions = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' };
+        
+        // 1. Update Global Top Clock
+        let clockElem = document.getElementById('global-clock');
+        if (clockElem) {
+            clockElem.innerText = displayDate.toLocaleDateString() + " " + displayDate.toLocaleTimeString([], timeOptions);
+        }
+
+        // 2. Update all active countdowns (Now includes seconds!)
+        document.querySelectorAll('.countdown-timer').forEach(function(el) {
+            let nextRunStr = el.getAttribute('data-time');
+            if (nextRunStr && nextRunStr !== "None" && nextRunStr !== "Unknown") {
+                let safeStr = nextRunStr.replace(" ", "T");
+                let nextTime = new Date(safeStr).getTime();
+                
+                if (!isNaN(nextTime)) {
+                    let diff = nextTime - remoteTime;
+                    if (diff > 0) {
+                        let hours = Math.floor(diff / 3600000);
+                        let mins = Math.floor((diff % 3600000) / 60000);
+                        let secs = Math.floor((diff % 60000) / 1000);
+                        
+                        let text = "";
+                        if (hours > 0) text += hours + "h ";
+                        text += mins + "m " + secs + "s";
+                        el.innerText = text;
+                    } else {
+                        el.innerText = "Imminent...";
+                    }
+                }
+            } else {
+                el.innerText = "Unknown";
+            }
         });
-    </script>
+    }
 
-    <script src="{{ url_for('static', filename='js/vis-timeline-graph2d.min.js') }}"></script>
+    // Start UI clock loop
+    setInterval(updateLiveClocks, 1000);
+    updateLiveClocks();
 
-    <script type="text/javascript">
-        
-        // --- A. Define Colors ---
-        {% set palette = ['#3366CC', '#DC3912', '#FF9900', '#109618', '#990099', '#3B3EAC', '#0099C6', '#DD4477', '#66AA00', '#B82E2E'] %}
+    // ==============================================================
+    // DYNAMIC AUTO-REFRESH
+    // Polls the lightweight /api/status JSON endpoint and surgically
+    // updates the live telemetry, instead of re-rendering the whole page
+    // (which previously re-loaded every experiment server-side).
+    // ==============================================================
+    function applyStatus(data) {
+        // --- Alerts banner ---
+        var alertBox = document.getElementById('system-alert-box');
+        var alertList = document.getElementById('system-alert-list');
+        var alerts = data.alerts || {};
+        if (alertBox && alertList) {
+            if (alerts.has_warnings && (alerts.issues || []).length) {
+                alertList.innerHTML = alerts.issues.map(function(i) {
+                    var li = document.createElement('li');
+                    li.textContent = i;
+                    return li.outerHTML;
+                }).join('');
+                alertBox.classList.remove('d-none');
+            } else {
+                alertBox.classList.add('d-none');
+            }
+        }
 
-        // Create a DataSet (allows two way data-binding)
-        var items = new vis.DataSet([
-            {% for exp in exps.exps %}
-                {
-                    id: '{{ exp.expid }}',
-                    content: '{{ exp.expid }}',
-                    // Use Jinja to format date as ISO string directly
-                    start: '{{ exp.start.strftime("%Y-%m-%dT%H:%M:%S") }}',
-                    end:   '{{ exp.end.strftime("%Y-%m-%dT%H:%M:%S") }}',
-                    group: '{{ exp.status }}',
-                    style: 'background-color: {{ palette[loop.index0 % 10] }}; color: white;'
-                },
-            {% endfor %}
-        ]);
+        // --- Vitals 1: Next Action ---
+        var nextAction = document.getElementById('vital-next-action');
+        if (nextAction) {
+            if (data.next_picture && data.next_picture !== 'None') {
+                nextAction.textContent = data.next_picture;
+                nextAction.className = 'text-primary font-weight-bold';
+            } else {
+                nextAction.textContent = 'None scheduled';
+                nextAction.className = '';
+            }
+        }
 
-        // --- B. Add "SERVER TIME" Marker ---
-        // We add this as a background item or point item
-        // Ensure server_now is ISO formatted from Python or standard string
-        var serverNowStr = "{{ now }}".replace(' ', 'T'); 
-        
-        items.add({
-            id: 'server_now',
-            content: '',
-            start: serverNowStr,
-            type: 'point', 
-            className: 'server-time-line'
+        // --- Vitals 3: Storage ---
+        var storage = (data.system_health || {}).storage || {};
+        var free = document.getElementById('vital-storage-free');
+        var bar = document.getElementById('vital-storage-bar');
+        var detail = document.getElementById('vital-storage-detail');
+        if (free && storage.free_gb !== undefined) {
+            var danger = storage.percent_used > 90;
+            free.textContent = storage.free_gb + ' GB Free';
+            free.className = 'mb-2 ' + (danger ? 'text-danger' : 'text-dark') + ' font-weight-bold';
+            if (bar) {
+                bar.className = 'progress-bar ' + (danger ? 'bg-danger' : 'bg-info');
+                bar.style.width = storage.percent_used + '%';
+            }
+            if (detail) {
+                detail.textContent = storage.percent_used + '% Used of ' + storage.total_gb + ' GB';
+            }
+        }
+
+        // --- Vitals 4: Cloud Sync ---
+        var syncBody = document.getElementById('vital-sync-body');
+        var sync = data.sync || {};
+        if (syncBody) {
+            if (!sync.sync_enabled) {
+                syncBody.innerHTML = '<h4 class="mb-2 text-muted font-weight-bold"><i class="fas fa-ban"></i> Disabled</h4>'
+                     + '<div class="progress" style="height: 6px;"><div class="progress-bar bg-secondary" style="width: 100%;"></div></div>'
+                     + '<small class="text-muted mt-2 d-block">Network transfers off</small>';
+            } else if (sync.is_syncing) {
+                syncBody.innerHTML = '<h4 class="mb-2 text-primary font-weight-bold"><i class="fas fa-sync-alt fa-spin"></i> Syncing</h4>'
+                     + '<div class="progress" style="height: 6px;"><div class="progress-bar bg-primary progress-bar-striped progress-bar-animated" style="width: 100%;"></div></div>'
+                     + '<small class="text-muted mt-2 d-block text-truncate"></small>';
+                // Set status text via textContent to avoid HTML injection from rclone output.
+                syncBody.querySelector('small').textContent = sync.status_msg || '';
+            } else {
+                syncBody.innerHTML = '<h4 class="mb-2 text-success font-weight-bold"><i class="fas fa-check"></i> Idle</h4>'
+                     + '<div class="progress" style="height: 6px;"><div class="progress-bar bg-success" style="width: 100%;"></div></div>'
+                     + '<small class="text-muted mt-2 d-block text-truncate">Success: ' + (sync.last_success || 'Never') + '</small>';
+            }
+        }
+
+        // --- Running experiment cards: live progress ---
+        var jobs = data.jobs || {};
+        document.querySelectorAll('[data-job-id]').forEach(function(card) {
+            var job = jobs[card.getAttribute('data-job-id')];
+            if (!job || !job.progress) return;
+            var prog = job.progress;
+            var percent = prog.expected > 0 ? Math.round((prog.taken / prog.expected) * 1000) / 10 : 0;
+            var text = card.querySelector('[data-job-progress-text]');
+            var pbar = card.querySelector('[data-job-progress-bar]');
+            if (text) text.textContent = prog.taken + ' / ' + prog.expected + ' (' + percent + '%)';
+            if (pbar) pbar.style.width = percent + '%';
         });
+    }
 
-        // --- C. Define Groups (Must match exp.status exactly!) ---
-        var groups = new vis.DataSet([
-            {id: 'DIAGNOSTICS',  content: 'Diagnostics'}, 
-            {id: 'NEW',         content: 'New / Draft'},
-            {id: 'RUNNING',     content: 'Running'},
-            {id: 'SCHEDULED',   content: 'Scheduled'},
-            {id: 'FINISHED',    content: 'Finished'},
-            {id: 'CANCELLED',   content: 'Cancelled'}, 
-            {id: 'ERROR',       content: 'Error'}
-        ]);
-
-        // --- D. Configuration ---
-        var container = document.getElementById('visualization');
-        
-        var options = {
-            groupOrder: function (a, b) {
-                var order = ['DIAGNOSTICS', 'NEW', 'RUNNING', 'SCHEDULED', 'FINISHED', 'CANCELLED', 'ERROR'];
-                return order.indexOf(a.id) - order.indexOf(b.id);
-            },
-            editable: false,
-            stack: true,
-            margin: { item: 5, axis: 5 },
-            orientation: 'top',
-            showCurrentTime: false, // We use our own custom red line
-            zoomMin: 1000 * 60 * 60, // 1 hour
-            zoomMax: 1000 * 60 * 60 * 24 * 31 * 3 // 3 months
-        };
-
-        // --- E. Render ---
-        // Only render if we have data or at least the server time
-        var timeline = new vis.Timeline(container, items, groups, options);
-        
-        // Focus on server time initially
-        timeline.moveTo(serverNowStr);
-
-    </script>
+    function startDashboardAutoRefresh() {
+        setInterval(function() {
+            fetch("{{ url_for('api_exp.get_system_status') }}")
+                .then(response => response.json())
+                .then(applyStatus)
+                .catch(err => console.warn('Status refresh failed', err));
+        }, 5000); // Check every 5 seconds
+    }
+    
+    $(document).ready(function() {
+        startDashboardAutoRefresh();
+    });
+</script>
 {% endblock %}

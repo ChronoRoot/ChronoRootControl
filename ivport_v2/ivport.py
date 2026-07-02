@@ -32,21 +32,13 @@ import sys
 from functools import reduce
 
 try:
-#    import IIC
-    from ivport_v2 import IIC
+    from . import IIC
     import RPi.GPIO as gp
     gp.setwarnings(False)
     gp.setmode(gp.BOARD)
-except:
+except ImportError:
     print("There are no IIC.py and RPi.GPIO module.")
-    print("install RPi.GPIO: sudo apt-get install python-rpi.gpio")
-    raise
-    sys.exit(0)
-
-try:
-    import picamera
-except:
-    print("There are no picamera module or directory.")
+    print("install RPi.GPIO: sudo apt-get install python3-rpi.gpio")
     sys.exit(0)
 
 TYPE_QUAD = 0
@@ -70,7 +62,6 @@ class IVPort():
         self.ivport_jumper = iv_jumper
         if not self.is_dual: self.ivport_jumper = 'A'
         self.camera = 1
-        self.is_opened = False
 
         if self.is_camera_v2:
             self.iviic = IIC.IIC(addr=(0x70), bus_enable =(0x01))
@@ -88,7 +79,6 @@ class IVPort():
             gp.setup(self.f2Pin, gp.OUT)
             gp.setup(self.ePin, gp.OUT)
 
-    # ivport camera change
     def camera_change(self, camera=1):
         if self.is_dual:
             if camera == 1:
@@ -98,10 +88,7 @@ class IVPort():
                 if self.is_camera_v2: self.iviic.write_control_register((0x02))
                 gp.output(self.fPin, True)
             else:
-                print("Ivport type is DUAL.")
-                print("There isnt camera: %d" % camera)
-                self.close()
-                sys.exit(0)
+                raise ValueError(f"Ivport type is DUAL. There isn't camera: {camera}")
         else:
             if camera == 1:
                 if self.is_camera_v2: self.iviic.write_control_register((0x01))
@@ -124,36 +111,8 @@ class IVPort():
                 gp.output(self.f1Pin, True)
                 gp.output(self.f2Pin, False)
             else:
-                print("Ivport type is QUAD.")
-                print("Cluster feature hasnt been implemented yet.")
-                print("There isnt camera: %d" % camera)
-                self.close()
-                sys.exit(0)
+                raise ValueError(f"Ivport type is QUAD. There isn't camera: {camera}")
         self.camera = camera
-
-    # picamera initialize
-    # Camera V2
-    # capture_sequence and start_recording require "camera_v2=True"
-    # standart capture function doesnt require "camera_v2=True"
-    def camera_open(self, camera_v2=False, resolution=None, framerate=None, grayscale=False):
-        if self.is_opened: return
-        self.picam = picamera.PiCamera(camera_v2=camera_v2, resolution=resolution, framerate=framerate)
-        if grayscale: self.picam.color_effects = (128, 128)
-        self.is_opened = True
-
-    # picamera capture
-    def camera_capture(self, filename, **options):
-        if self.is_opened:
-            self.picam.capture(filename + "_CAM" + str(self.camera) + '.jpg', **options)
-        else:
-            print("Camera is not opened.")
-
-    def camera_sequence(self, **options):
-        if self.is_opened:
-            self.picam.capture_sequence(**options)
-        else:
-            print("Camera is not opened.")
 
     def close(self):
         self.camera_change(1)
-        if self.is_opened: self.picam.close()

@@ -1,0 +1,121 @@
+<div aria-live="polite" aria-atomic="true" style="position: fixed; top: 20px; right: 20px; z-index: 9999; pointer-events: none;">
+    <div id="appToast" class="toast border shadow-lg" role="alert" aria-live="assertive" aria-atomic="true" data-autohide="true" style="min-width: 300px; pointer-events: auto;">
+        <div class="toast-header bg-light text-dark border-bottom">
+            <i id="toastIcon" class="fas fa-info-circle mr-2"></i>
+            <strong class="mr-auto" id="toastTitle">Notification</strong>
+            <button type="button" class="ml-2 mb-1 close" data-dismiss="toast" aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+            </button>
+        </div>
+        <div class="toast-body bg-white text-center py-4">
+            <div id="toastMessage" class="mb-4" style="font-size: 1.05rem;"></div>
+            <div>
+                <button type="button" class="btn btn-dark px-5 font-weight-bold" data-dismiss="toast">Accept</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="customConfirmModal" tabindex="-1" aria-hidden="true" style="z-index: 9998;">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content shadow border-0">
+      <div class="modal-header bg-light text-dark border-bottom py-3">
+        <h5 class="modal-title" id="confirmModalTitle">Confirm</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body py-4 text-center bg-white" style="font-size: 1.05rem;" id="confirmModalBody">
+        Are you sure?
+      </div>
+      <div class="modal-footer border-top bg-light justify-content-center py-2">
+        <button type="button" class="btn btn-outline-secondary px-4" data-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-dark px-4" id="confirmModalBtn">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+    // --- GLOBAL UI ENGINE (jQuery / BS4) ---
+    
+    function showToast(message, type = 'success') {
+        const toastTitle = $('#toastTitle');
+        const toastMsg = $('#toastMessage');
+        const toastIcon = $('#toastIcon');
+        
+        if (type === 'danger') {
+            toastIcon.attr('class', 'fas fa-exclamation-circle text-danger mr-2');
+            toastTitle.text('Alert');
+        } else if (type === 'warning') {
+            toastIcon.attr('class', 'fas fa-exclamation-triangle text-warning mr-2');
+            toastTitle.text('Warning');
+        } else if (type === 'success') {
+            toastIcon.attr('class', 'fas fa-check-circle text-success mr-2');
+            toastTitle.text('Success');
+        } else {
+            toastIcon.attr('class', 'fas fa-info-circle text-secondary mr-2');
+            toastTitle.text('Information');
+        }
+
+        toastMsg.html(message.replace(/\n/g, '<br>'));
+        $('#appToast').toast('show');
+    }
+
+    function asyncConfirm(title, message, isDanger = false) {
+        return new Promise((resolve) => {
+            $('#confirmModalTitle').html(title);
+            $('#confirmModalBody').html(message.replace(/\n/g, '<br>'));
+            
+            const btn = $('#confirmModalBtn');
+            btn.removeClass('btn-dark btn-danger').addClass(isDanger ? 'btn-danger' : 'btn-dark');
+            
+            // 1. Unbind old listeners to prevent stacking
+            btn.off('click');
+            $('#customConfirmModal').off('hidden.bs.modal');
+            
+            // 2. Handle an explicit "Confirm" click
+            btn.on('click', () => {
+                // Prevent the hidden event from firing the 'Cancel' resolve
+                $('#customConfirmModal').off('hidden.bs.modal'); 
+                $('#customConfirmModal').modal('hide');
+                resolve(true);
+            });
+            
+            // 3. Handle a "Cancel" (clicks outside, hits Escape, or clicks X)
+            $('#customConfirmModal').on('hidden.bs.modal', () => {
+                resolve(false); 
+            });
+            
+            $('#customConfirmModal').modal('show');
+        });
+    }
+
+    // Helper to safely submit forms with async confirmation modals
+    async function confirmSubmit(event, button, title, message, isDanger = false) {
+        event.preventDefault(); 
+        
+        const confirmed = await asyncConfirm(title, message, isDanger);
+        
+        if (confirmed) {
+            const form = button.closest('form');
+            
+            if (button.name) {
+                const hiddenField = document.createElement('input');
+                hiddenField.type = 'hidden';
+                hiddenField.name = button.name;
+                hiddenField.value = button.value;
+                form.appendChild(hiddenField);
+            }
+            
+            // SAFER LOADING STATE:
+            // Prevent double-clicking via CSS rather than the HTML 'disabled' attribute
+            // to ensure the form submission doesn't get interrupted.
+            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Processing...';
+            button.style.pointerEvents = 'none';
+            button.style.opacity = '0.7';
+            
+            form.submit();
+        }
+    }
+</script>

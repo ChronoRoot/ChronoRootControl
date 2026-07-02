@@ -7,9 +7,9 @@ import datetime
 
 from flask_wtf import FlaskForm as Form
 from wtforms import (BooleanField, IntegerField, SelectMultipleField,
-                     TextAreaField, ValidationError)
-from wtforms.ext.dateutil.fields import DateTimeField
-from wtforms.validators import Optional
+                     TextAreaField, ValidationError, StringField)
+from wtforms.fields import DateTimeField
+from wtforms.validators import Optional, Length
 from config import Config
 
 from phototron.rpimodule import RpiModule
@@ -21,17 +21,21 @@ class SettingsForm(Form):
 
     rpi = RpiModule()
 
+    name = StringField("Experiment Name",
+                       validators=[Optional(), Length(max=16)],
+                       description='Short name for the experiment folder')
+
     desc = TextAreaField(u"Description:",
                         validators=[Optional()],
                         description='About this experiment')
     
     # Use Config.PRETTY_FORMAT (No %z)
     start = DateTimeField("Start Time",
-                          display_format=Config.PRETTY_FORMAT,
+                          format=Config.PRETTY_FORMAT,
                           default=datetime.datetime.now)
                           
     end = DateTimeField("End Time",
-                        display_format=Config.PRETTY_FORMAT,
+                        format=Config.PRETTY_FORMAT,
                         default=datetime.datetime.now)
                         
     interval = IntegerField("Interval (minutes)",
@@ -44,10 +48,10 @@ class SettingsForm(Form):
 
     cameras = SelectMultipleField('Cameras',
                                   choices=[(cam, "Camera %s" % cam) for cam in Config.CAMS],
-                                  default=[1],
+                                  default=list(Config.CAMS),  
                                   coerce=int,
                                   description='Cameras to use')
-                                  
+    
     camera = rpi.selector.get_camera()
 
     # --- BACKEND VALIDATIONS ---
@@ -61,10 +65,10 @@ class SettingsForm(Form):
 
     def validate_interval(self, field):
         """
-        Validate interval is at least 10 minutes
+        Validate interval is at least 5 minutes
         """
-        if field.data < 10:
-            raise ValidationError("Interval too short. Minimum time between pictures is 10 minutes.")
+        if field.data < 5:
+            raise ValidationError("Interval too short. Minimum time between pictures is 5 minutes.")
 
     def validate_start(self, field):
         """
@@ -82,16 +86,16 @@ class SettingsForm(Form):
 
     def validate_end(self, field):
         """
-        Validate end time is at least 10 minutes after start time
+        Validate end time is at least 5 minutes after start time
         """
         if field.data and self.start.data:
             # Force naive for comparison
             end_naive = field.data.replace(tzinfo=None)
             start_naive = self.start.data.replace(tzinfo=None)
             
-            min_duration = datetime.timedelta(minutes=10)
+            min_duration = datetime.timedelta(minutes=5)
             if end_naive < (start_naive + min_duration):
-                raise ValidationError("Duration too short. Experiment must run for at least 10 minutes.")
+                raise ValidationError("Duration too short. Experiment must run for at least 5 minutes.")
             
     def validate_overlap(self, current_exp_id=None):
         """

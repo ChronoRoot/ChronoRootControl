@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}
+    {{ config.SITE_NAME }} - Wi-Fi Settings
+{% endblock %}
+
+{% block header %}
+    <style>
+        .comitup-frame {
+            width: 100%;
+            height: 650px;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            background-color: #f8f9fa;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <h1 class="mt-5">Network & Wi-Fi Settings</h1>
+    <p class="lead text-muted">Manage the ChronoRoot module's connection to the local network.</p>
+
+    {% if is_ap_mode %}
+        <!-- ========================================== -->
+        <!-- STATE 1: SETUP MODE (HOTSPOT ACTIVE)       -->
+        <!-- ========================================== -->
+        <div class="card shadow-sm mb-4 border-warning">
+            <div class="card-header bg-warning text-dark font-weight-bold">
+                <i class="fas fa-satellite-dish mr-2"></i> Setup Hotspot Active
+            </div>
+            <div class="card-body">
+                <p>
+                    You are currently connected directly to the module's <strong>comitup</strong> hotspot. 
+                    You can continue to use the system offline, or use the interface below to connect it to a local lab router.
+                </p>
+                <hr>
+                <!-- Embed Comitup Interface (Running on Port 8081) -->
+                <iframe src="http://{{ ip }}:8081" class="comitup-frame shadow-sm"></iframe>
+            </div>
+        </div>
+
+    {% else %}
+        <!-- ========================================== -->
+        <!-- STATE 2: CONNECTED MODE                    -->
+        <!-- ========================================== -->
+        <div class="card shadow-sm mb-4 border-success">
+            <div class="card-header bg-success text-white font-weight-bold">
+                <i class="fas fa-network-wired mr-2"></i> Connected to Local Network
+            </div>
+            <div class="card-body">
+                <p class="lead">The module is successfully communicating with your local network.</p>
+                
+                <div class="alert alert-light border mb-4">
+                    <i class="fas fa-server mr-2 text-muted"></i> 
+                    <strong>Current IP Address:</strong> <code>{{ ip }}</code>
+                </div>
+
+                <h5>Move to a new lab or network?</h5>
+                <p class="text-muted mb-3">
+                    If you need to change the Wi-Fi network, you can force the module to forget its current connection. 
+                    It will immediately disconnect from this router and start the setup hotspot.
+                </p>
+                
+                <button id="resetWifiBtn" class="btn btn-danger shadow-sm" onclick="resetWifi()">
+                    <i class="fas fa-unlink mr-2"></i> Forget Network & Restart Hotspot
+                </button>
+            </div>
+        </div>
+    {% endif %}
+
+{% endblock %}
+
+{% block footer %}
+    <script>
+        function resetWifi() {
+            const confirmed = await asyncConfirm("WARNING: This will disconnect the ChronoRoot module from the current network immediately. You will lose connection to this page.\n\nDo you want to proceed?")
+                
+            if (confirmed) {
+                const btn = document.getElementById('resetWifiBtn');
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Resetting...';
+                btn.disabled = true;
+
+                // Call the Python backend route we created in the Blueprint
+                fetch("{{ url_for('wifi_page.reset_wifi') }}", {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if(data.success) {
+                        showToast("Success! The Pi is restarting its network adapter.\n\nPlease check your computer/phone Wi-Fi settings in about 30 seconds and look for the 'comitup-...' network.", "info");
+                    } else {
+                        showToast("Error: " + data.message, "info");
+                        btn.innerHTML = '<i class="fas fa-unlink mr-2"></i> Forget Network & Restart Hotspot';
+                        btn.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    // Even if the fetch fails (because the Pi drops off the network instantly), 
+                    // it usually means the command worked and the Pi disconnected.
+                    showToast("The network connection has dropped! The Pi is likely rebooting into hotspot mode now.", "info");
+                });
+            }
+        }
+    </script>
+{% endblock %}

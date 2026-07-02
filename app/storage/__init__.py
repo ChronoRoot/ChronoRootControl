@@ -3,8 +3,10 @@ import shutil
 import subprocess
 import json
 import time
-from flask import Blueprint, render_template, send_from_directory, abort, request, flash, url_for
+from flask import Blueprint, render_template, send_from_directory, abort, request, flash, url_for, redirect
 from config import Config
+from app.options.config_manager import save_user_config
+from app.storage.stats import get_storage_stats
 
 storage_page = Blueprint('storage_page', __name__,
                          template_folder='templates',
@@ -113,24 +115,28 @@ def get_block_devices():
 
 @storage_page.route('/')
 def index():
-    path = Config.WORKING_DIR
-    
-    # 1. Disk Usage (Same as before)
+    # 1. Disk Usage
     try:
-        total, used, free = shutil.disk_usage(path)
-        percent = (used / total) * 100
-        is_mounted = os.stat('/').st_dev != os.stat(path).st_dev
+        stats = get_storage_stats()
+        info = {
+            "path": stats["path"],
+            "total_gb": stats["total_gb"],
+            "free_gb": stats["free_gb"],
+            "percent": stats["percent_used"],
+            "used_gb": stats["used_gb"],
+            "is_mounted": stats["is_external_mount"],
+        }
     except FileNotFoundError:
-        total, used, free, percent, is_mounted = 0, 0, 0, 0, False
+        info = {
+            "path": Config.WORKING_DIR,
+            "total_gb": 0,
+            "free_gb": 0,
+            "percent": 0,
+            "used_gb": 0,
+            "is_mounted": False,
+        }
 
-    info = {
-        "path": path,
-        "total_gb": round(total / (2**30), 2),
-        "free_gb": round(free / (2**30), 2),
-        "percent": round(percent, 1),
-        "used_gb": round(used / (2**30), 2),
-        "is_mounted": is_mounted
-    }
+    path = info["path"]
     
     # 2. List ALL Content (Files & Folders)
     items = []
@@ -182,89 +188,33 @@ def index():
 @storage_page.route('/set_path', methods=['POST'])
 def set_path():
     """
-    Updates the WORKING_DIR by writing to 'user_config.py'.
-    This overrides the defaults without modifying default_config.py.
+    Updates the WORKING_DIR by writing to 'user_config.py' using the unified manager.
     """
     new_path = request.form.get('new_path')
     
+    # NEW: Catch the manual override
+    if new_path == 'manual':
+        new_path = request.form.get('manual_path')
+        # Optional safety check: Ensure the folder actually exists before saving
+        import os
+        if new_path and not os.path.exists(new_path):
+            flash(f"Warning: The path '{new_path}' does not exist on the system.", "danger")
+            return render_template('restarting.html', target_url=url_for('storage_page.index'))
+
     if not new_path:
-        flash("No path selected.", "danger")
-        target_url = url_for('storage_page.index')
-        return f"<script>window.location.href = '{target_url}';</script>"
+        flash("No path selected or entered.", "danger")
+        return render_template('restarting.html', target_url=url_for('storage_page.index'))
 
-    # 1. Locate where user_config.py should be
-    # It must be in the same folder as config.py
-    project_root = "/srv/ChronoRootControl"
-    user_config_file = os.path.join(project_root, 'user_config.py')
+    # 1. Use the unified config saver
+    success, msg = save_user_config({'WORKING_DIR': new_path})
 
-    # 2. Check Permissions (if file exists)
-    if os.path.exists(user_config_file) and not os.access(user_config_file, os.W_OK):
-        flash(f"Permission Error: Cannot write to {user_config_file}. Check file ownership.", "danger")
-        target_url = url_for('storage_page.index')
-        return f"<script>window.location.href = '{target_url}';</script>"
-
-    try:
-        # 3. Read existing file or start empty
-        lines = []
-        if os.path.exists(user_config_file):
-            with open(user_config_file, 'r') as f:
-                lines = f.readlines()
-
-        # 4. Analyze content
-        has_class = False
-        var_found = False
-        new_lines = []
-        
-        # Check if 'class Config' exists
-        for line in lines:
-            if "class Config" in line:
-                has_class = True
-            if "WORKING_DIR =" in line:
-                var_found = True
-                # Replace the existing line, preserving indentation
-                prefix = line.split("WORKING_DIR")[0]
-                new_lines.append(f"{prefix}WORKING_DIR = '{new_path}'\n")
-            else:
-                new_lines.append(line)
-
-        # 5. Logic to Insert if missing
-        if not has_class:
-            # File is empty or has no Config class -> Create it
-            new_lines.append("\nclass Config(object):\n")
-            new_lines.append(f"    WORKING_DIR = '{new_path}'\n")
-        
-        elif has_class and not var_found:
-            # Class exists but WORKING_DIR is not inside it -> Insert it
-            # We insert it right after the "class Config" line
-            final_lines = []
-            for line in new_lines:
-                final_lines.append(line)
-                if "class Config" in line:
-                    final_lines.append(f"    WORKING_DIR = '{new_path}'\n")
-            new_lines = final_lines
-
-        # 6. Write back to file
-        with open(user_config_file, 'w') as f:
-            f.writelines(new_lines)
-            
+    if success:
         flash(f"Success! Storage path set to {new_path}.", "success")
-
-    except Exception as e:
-        flash(f"System Error updating config: {e}", "danger")
+    else:
+        flash(f"System Error updating config: {msg}", "danger")
         
+    # 2. Redirect to the global restarting page
     return render_template('restarting.html', target_url=url_for('storage_page.index'))
-
-@storage_page.route('/trigger_restart')
-def trigger_restart():
-    """
-    This route is called via AJAX by the restarting.html page.
-    It executes the shell command to kill/restart the service.
-    """
-    
-    time.sleep(1) # Give the server a moment to send the 200 OK response
-    subprocess.run(["sudo", "systemctl", "restart", "uwsgi"])
-        
-    return "Restarting..."
 
 @storage_page.route('/mount_drive', methods=['POST'])
 def mount_drive():
@@ -283,8 +233,7 @@ def mount_drive():
     
     if not device_uuid:
         flash("Error: Drive has no UUID. Cannot mount persistently.", "danger")
-        target_url = url_for('storage_page.index')
-        return f"<script>window.location.href = '{target_url}';</script>"
+        return redirect(url_for('storage_page.index'))
 
     try:
         # Step 1: Create Mount Point
@@ -339,8 +288,7 @@ def mount_drive():
     except Exception as e:
         flash(f"Error: {e}", "danger")
         
-    target_url = url_for('storage_page.index')
-    return f"<script>window.location.href = '{target_url}';</script>"
+    return redirect(url_for('storage_page.index'))
 
 @storage_page.route('/browse/<path:subpath>')
 def browse(subpath):

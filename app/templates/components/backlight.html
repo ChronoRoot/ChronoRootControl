@@ -1,34 +1,63 @@
 <h2>Backlight
-    {% if light_state %}
-        <span class="badge badge-warning">
-            ON <i class="fas fa-sun"></i>
-        </span>
-    {% else %}
-        <span class="badge badge-secondary">
-            OFF <i class="fas fa-moon"></i>
-        </span>
-    {% endif %}
+    <span id="light-status-badge" class="badge {{ 'badge-warning' if light_state else 'badge-secondary' }}">
+        <span id="light-status-text">{{ 'ON' if light_state else 'OFF' }}</span> 
+        <i id="light-status-icon" class="fas {{ 'fa-sun' if light_state else 'fa-moon' }}"></i>
+    </span>
 </h2>
-<form action="" method="post" name="backlight" class="form-inline mt-5">
-    {{ backlight_form.hidden_tag() }}
-    {% if backlight_form.ir.errors %}
-    <div class="form-group has-error mb-2 mr-sm-2">
-    {% else %}
-    <div class="form-group mb-2 mr-sm-2">
-    {% endif %}
-        <div class="custom-control custom-switch mb-2">
-            {{ backlight_form.ir(class="custom-control-input") }}
-            {# <input type="checkbox" class="custom-control-input" id="customSwitch1"> #}
-            <label class="custom-control-label" for="backlight-ir">IR Backlight</label>
-        </div>
-        {% for error in backlight_form.ir.errors %}
-        <div class="alert alert-danger" role="alert">
-            <span class="glyphicon glyphicon-exclamation-sign" aria-hidden="true"></span>
-            {{error}}
-        </div>
-        {% endfor %}
+
+<div class="form-group mb-2 mt-5">
+    <div class="custom-control custom-switch mb-2">
+        <input type="checkbox" class="custom-control-input" id="backlight-ir" 
+               {% if light_state %}checked{% endif %} 
+               onchange="toggleLight(this.checked)">
+        <label class="custom-control-label" for="backlight-ir">IR Backlight</label>
     </div>
-    <button type="submit" name="action" value="set" class="btn btn-info mb-2" aria-label="Set">
-        Apply
-    </button>
-</form>
+</div>
+
+<script>
+function toggleLight(isTurningOn) {
+    // Disable the switch temporarily to prevent spam-clicking
+    const toggleInput = document.getElementById('backlight-ir');
+    toggleInput.disabled = true;
+
+    // Send the background request to our new Flask route
+    fetch("{{ url_for('focus_page.toggle_light') }}", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ir_state: isTurningOn })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the UI badge dynamically based on the new state
+            const badge = document.getElementById('light-status-badge');
+            const text = document.getElementById('light-status-text');
+            const icon = document.getElementById('light-status-icon');
+            
+            if (data.light_state) {
+                badge.className = "badge badge-warning";
+                text.innerText = "ON ";
+                icon.className = "fas fa-sun";
+            } else {
+                badge.className = "badge badge-secondary";
+                text.innerText = "OFF ";
+                icon.className = "fas fa-moon";
+            }
+        } else {
+            showToast("Failed to toggle light: " + data.error, "info");
+            toggleInput.checked = !isTurningOn; // Revert the switch if it failed
+        }
+    })
+    .catch(error => {
+        console.error("Error:", error);
+        showToast("Network error occurred.", "info");
+        toggleInput.checked = !isTurningOn; // Revert the switch
+    })
+    .finally(() => {
+        // Re-enable the switch after the request (and the Python time.sleep) finishes
+        toggleInput.disabled = false;
+    });
+}
+</script>

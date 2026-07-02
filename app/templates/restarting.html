@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}
+    {{ config.SITE_NAME }}
+{% endblock %}
+
+{% block content %}
+<div class="row mt-5">
+    <div class="col-md-6 offset-md-3 text-center">
+        <div class="card shadow">
+            <div class="card-body py-5">
+                <i class="fas fa-sync-alt fa-spin fa-4x text-info mb-4"></i>
+                <h3 class="mb-3">Applying Changes</h3>
+                <p class="text-muted">Restarting the application service to apply the new configuration. <br>Please wait...</p>
+                
+                <div class="progress mt-4 mb-2" style="height: 5px;">
+                    <div id="progressBar" class="progress-bar bg-info" role="progressbar" style="width: 0%"></div>
+                </div>
+                <small id="timerText" class="text-muted">Wait 10s</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. Trigger the actual restart command
+    fetch("{{ url_for('api_exp.restart_service') }}")
+        .then(response => console.log("Restart signal sent."));
+
+    // 2. Countdown & Redirect Logic
+    let seconds = 10;
+    const total = seconds;
+    const bar = document.getElementById('progressBar');
+    const txt = document.getElementById('timerText');
+    const target = "{{ target_url }}";
+
+    const timer = setInterval(() => {
+        seconds--;
+        const percent = ((total - seconds) / total) * 100;
+        bar.style.width = percent + "%";
+        txt.innerText = "Reloading... " + seconds + "s";
+
+        if (seconds <= 0) {
+            clearInterval(timer);
+            // Try to reload the destination
+            window.location.href = target;
+        }
+    }, 1000);
+</script>
+{% endblock %}
