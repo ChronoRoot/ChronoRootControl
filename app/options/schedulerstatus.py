@@ -114,6 +114,10 @@ class SchedulerStatus(object):
             elif "activity" not in self.state["hardware"]["cams"][cam_str]:
                 self.state["hardware"]["cams"][cam_str]["activity"] = "IDLE"
                 needs_write = True
+            elif self.state["hardware"].get("lock_info", {}).get("status") == "FREE":
+                if self.state["hardware"]["cams"][cam_str].get("activity") != "IDLE":
+                    self.state["hardware"]["cams"][cam_str]["activity"] = "IDLE"
+                    needs_write = True
 
         # B. Remove ghost cameras (ones that exist in state but were removed from Config)
         existing_cams = list(self.state["hardware"]["cams"].keys())
@@ -315,6 +319,11 @@ class SchedulerStatus(object):
             "details": details,
             "acquired_at": acquired_time  # <-- Added to state
         }
+        
+        # If lock is released, ensure all cameras are marked as IDLE
+        if status == "FREE":
+            for cam_id in self.state["hardware"]["cams"]:
+                self.state["hardware"]["cams"][cam_id]["activity"] = "IDLE"
              
         self.write()
 
