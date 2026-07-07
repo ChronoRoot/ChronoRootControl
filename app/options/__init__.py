@@ -3,16 +3,17 @@
 #
 
 from datetime import datetime
-from flask import Blueprint, flash, render_template, request, url_for, redirect
+from flask import Blueprint, flash, jsonify, render_template, request, url_for, redirect
 
-from .form import AppSettingsForm, HardwareSettingsForm, CameraProfileForm
+from .form import AppSettingsForm, HardwareSettingsForm, CameraProfileForm, HostnameForm
 from config import Config
 
 from phototron.rpimodule import RpiModule
 from app.options.schedulerstatus import SchedulerStatus
 
 # Import our new system and config managers
-from app.options.config_manager import apply_system_time_config, save_user_config
+from app.options.config_manager import (apply_system_time_config, save_user_config,
+                                        apply_hostname_config)
 
 config_page = Blueprint('config_page', __name__,
                         template_folder='templates',
@@ -33,6 +34,7 @@ def conf():
     app_setting_form = AppSettingsForm(prefix="app_setting")
     hw_form = HardwareSettingsForm(prefix="hw")
     camera_form = CameraProfileForm(prefix="cam")
+    hostname_form = HostnameForm(prefix="host")
 
     # 2. Pre-fill forms on GET
     if request.method == 'GET':
@@ -60,6 +62,9 @@ def conf():
         camera_form.exposure_time.data = manual_controls.get('ExposureTime', 30000)
         camera_form.analogue_gain.data = manual_controls.get('AnalogueGain', 1.0)
         camera_form.denoise.data = manual_controls.get('NoiseReductionMode', 0) != 0
+
+        # Pre-fill the current hostname so the user edits in place
+        hostname_form.hostname.data = scheduler_info.get('identity', {}).get('hostname', '')
         
     # --- 1. System Date & Time Logic ---
     if request.form.get('action') == 'set_time' and app_setting_form.validate_on_submit():
@@ -215,6 +220,14 @@ def conf():
             flash(f"Critical error saving config to disk: {msg}", "danger")
             return redirect(url_for('config_page.conf'))
 
+    # --- 4. Advanced: Hostname Change Logic ---
+    if request.form.get('action') == 'set_hostname':
+        # Answered as JSON: the frontend coordinates the follow-up reboot via
+        # the existing /api/reboot endpoint after this returns success.
+        new_hostname = request.form.get('host-hostname', '')
+        success, msg = apply_hostname_config(new_hostname)
+        return jsonify({'result': success, 'message': msg}), (200 if success else 400)
+
     # Calculate initial autofocus visibility state for the template
     current_profile = Config.CAMERA_PROFILES.get(getattr(Config, 'CAMERA_TYPE', 'RPICAM_V2'), {})
     has_autofocus = current_profile.get("autofocus", False)
@@ -223,6 +236,7 @@ def conf():
             app_setting_form=app_setting_form,
             hw_form=hw_form, 
             camera_form=camera_form,
+            hostname_form=hostname_form,
             light_state=light.state, config=Config, 
             scheduler_info=scheduler_info,
             has_autofocus=has_autofocus)

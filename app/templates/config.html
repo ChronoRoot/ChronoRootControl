@@ -557,6 +557,46 @@
     </div>
 </div>
 
+<!-- Device Hostname (Advanced) -->
+<div class="row mb-5">
+    <div class="col-12">
+        <div class="card shadow-sm border-dark">
+            <div class="card-header bg-dark text-white">
+                <h5 class="mb-0"><i class="fas fa-network-wired mr-2"></i>Device Hostname</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Rename this device on the network. The change is staged safely via
+                    <code>raspi-config</code> (which updates both <code>/etc/hostname</code> and
+                    <code>/etc/hosts</code>) and only takes effect after a reboot, which will be
+                    triggered automatically once you confirm.
+                </p>
+
+                <form action="" method="post" name="hostname_setting" id="hostname_form" onsubmit="return handleHostnameSubmit(event);">
+                    {{ hostname_form.hidden_tag() }}
+                    <input type="hidden" name="action" value="set_hostname">
+
+                    <div class="row align-items-end">
+                        <div class="col-md-6 form-group mb-md-0">
+                            <label class="font-weight-bold small">New Hostname</label>
+                            {{ hostname_form.hostname(class="form-control", id="host_hostname", maxlength="63", placeholder="e.g. chronoroot-01") }}
+                            <small class="form-text text-muted">
+                                Current: <strong>{{ scheduler_info.identity.hostname }}</strong> &mdash;
+                                1-63 lowercase letters, digits and hyphens (no leading/trailing hyphen).
+                            </small>
+                        </div>
+                        <div class="col-md-6 form-group mb-md-0">
+                            <button type="submit" id="hostname_save_btn" class="btn btn-dark btn-block">
+                                <i class="fas fa-tag mr-2"></i> Save Hostname & Reboot
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block footer %}
@@ -676,6 +716,54 @@
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             }
+        }
+        return false;
+    }
+
+    async function handleHostnameSubmit(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        const btn = document.getElementById('hostname_save_btn');
+        const originalText = btn.innerHTML;
+        const newName = (document.getElementById('host_hostname').value || '').trim().toLowerCase();
+
+        // Mirror of the backend validation to fail fast without a round-trip.
+        if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(newName)) {
+            showToast("Invalid hostname. Use 1-63 lowercase letters, digits and hyphens (no leading/trailing hyphen).", "info");
+            return false;
+        }
+
+        const confirmed = await asyncConfirm(
+            "Change Hostname & Reboot",
+            `The device will be renamed to '${newName}' and the system will REBOOT immediately to apply the change.\n\nAfter roughly one minute, reach it again at http://${newName}.local (or the same IP address).`,
+            true // red danger button
+        );
+        if (!confirmed) return false;
+
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Saving Hostname...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(window.location.href, { method: 'POST', body: new FormData(form) });
+            const data = await response.json();
+
+            if (!data.result) {
+                showToast("Hostname change failed: " + (data.message || "Unknown error"), "info");
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                return false;
+            }
+
+            // Staged on disk — now trigger the existing reboot endpoint to apply it.
+            btn.innerHTML = '<i class="fas fa-power-off mr-2"></i> Rebooting System...';
+            await fetch("{{ url_for('api_exp.reboot') }}", { method: 'POST', headers: {'Content-Type': 'application/json'} });
+            showToast(`Hostname saved. Rebooting now — the device will come back as '${newName}' in about a minute.`, "warning");
+        } catch (error) {
+            console.error("Hostname change failed", error);
+            showToast("Network error while changing the hostname.", "info");
+            btn.innerHTML = originalText;
+            btn.disabled = false;
         }
         return false;
     }

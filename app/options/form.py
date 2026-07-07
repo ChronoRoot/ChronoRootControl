@@ -9,7 +9,7 @@ from flask_wtf import FlaskForm as Form
 from wtforms import (BooleanField, SelectField, StringField, SelectMultipleField,
                      IntegerField, FloatField)
 from wtforms.fields import DateTimeField
-from wtforms.validators import Optional
+from wtforms.validators import Optional, DataRequired, Length, Regexp
 from wtforms import widgets 
 
 class AppSettingsForm(Form):
@@ -84,3 +84,15 @@ class CameraProfileForm(Form):
     exposure_time = IntegerField('Manual Exposure Time (us)', validators=[Optional()])
     analogue_gain = FloatField('Manual Analogue Gain', validators=[Optional()])
     denoise = BooleanField('Manual Backlight Denoise')
+
+class HostnameForm(Form):
+    """
+    Advanced: renames the device on the network (staged via raspi-config,
+    applied on the next reboot).
+    """
+    hostname = StringField('Device Hostname', validators=[
+        DataRequired(),
+        Length(min=1, max=63),
+        Regexp(r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$',
+               message="Only letters, digits and hyphens; cannot start or end with a hyphen.")
+    ])

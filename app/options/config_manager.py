@@ -1,11 +1,16 @@
 import importlib.util
 import os
+import re
 import time
 import os
 import subprocess
 import socket
 
 USER_CONFIG_PATH = '/srv/ChronoRootControl/user_config.py'
+
+# RFC 952/1123 single-label hostname: 1-63 chars, alphanumeric + hyphens,
+# no leading/trailing hyphen.
+HOSTNAME_PATTERN = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
 
 def save_user_config(new_settings):
     """
@@ -108,3 +113,40 @@ def apply_system_time_config(mode, date_str=None, timezone=None, ntp_server=None
         
     except subprocess.CalledProcessError as e:
         return False, f"OS Command Failed: {str(e)}"
+
+def apply_hostname_config(new_hostname):
+    """
+    Stages a hostname change using raspi-config's non-interactive mode:
+        raspi-config nonint do_hostname <name>
+
+    Why this is the safe path (and cannot hang sudo):
+    - raspi-config rewrites BOTH /etc/hostname and the 127.0.1.1 line in
+      /etc/hosts, so the machine can always resolve its own name. A mismatch
+      between those two files is what makes sudo stall for 10+ seconds.
+    - The change only takes effect on the NEXT reboot; the live hostname is
+      left untouched, so the current session stays fully consistent.
+    - 'sudo -n' never prompts for a password (it fails fast instead of
+      blocking on a tty), and the hard timeout guards against any other
+      unexpected stall.
+    """
+    new_hostname = (new_hostname or '').strip().lower()
+
+    if not HOSTNAME_PATTERN.match(new_hostname):
+        return False, ("Invalid hostname. Use 1-63 characters: lowercase letters, "
+                       "digits and hyphens (cannot start or end with a hyphen).")
+
+    try:
+        result = subprocess.run(
+            ['sudo', '-n', 'raspi-config', 'nonint', 'do_hostname', new_hostname],
+            capture_output=True, text=True, timeout=20
+        )
+    except subprocess.TimeoutExpired:
+        return False, "Hostname change timed out. The running system was not renamed."
+    except FileNotFoundError:
+        return False, "raspi-config is not available on this system."
+
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or '').strip()
+        return False, f"raspi-config failed (code {result.returncode}): {err or 'unknown error'}"
+
+    return True, f"Hostname staged as '{new_hostname}'. It takes effect after the next reboot."
