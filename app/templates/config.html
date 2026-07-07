@@ -557,6 +557,33 @@
     </div>
 </div>
 
+<!-- Software Update (Advanced) -->
+<div class="row mb-5">
+    <div class="col-12">
+        <div class="card shadow-sm border-info">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="fas fa-cloud-download-alt mr-2"></i>Software Update</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Pull the latest code from the repository (<code>git pull</code> in
+                    <code>/srv/ChronoRootControl</code>). This requires an internet connection.
+                    You will get a clear report of the result. Restart the services or reboot
+                    afterwards to run the new version.
+                </p>
+
+                <form action="" method="post" name="update_setting" id="update_form" onsubmit="return handleAppUpdate(event);">
+                    {{ hostname_form.csrf_token }}
+                    <input type="hidden" name="action" value="update_app">
+                    <button type="submit" id="update_app_btn" class="btn btn-info">
+                        <i class="fas fa-cloud-download-alt mr-2"></i> Check for Updates &amp; Pull
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Device Hostname (Advanced) -->
 <div class="row mb-5">
     <div class="col-12">
@@ -716,6 +743,31 @@
                 btn.innerHTML = originalText;
                 btn.disabled = false;
             }
+        }
+        return false;
+    }
+
+    async function handleAppUpdate(event) {
+        event.preventDefault();
+
+        const form = event.target;
+        const btn = document.getElementById('update_app_btn');
+        const originalText = btn.innerHTML;
+
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Checking for updates...';
+        btn.disabled = true;
+
+        try {
+            const response = await fetch(window.location.href, { method: 'POST', body: new FormData(form) });
+            const data = await response.json();
+            // showToast is now a centered dialog that stays until the user clicks Accept.
+            showToast(data.message, data.result ? 'success' : 'danger');
+        } catch (error) {
+            console.error("Software update failed", error);
+            showToast("Network error while contacting the server for the update.", "danger");
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
         }
         return false;
     }

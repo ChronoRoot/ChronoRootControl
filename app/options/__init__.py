@@ -13,7 +13,7 @@ from app.options.schedulerstatus import SchedulerStatus
 
 # Import our new system and config managers
 from app.options.config_manager import (apply_system_time_config, save_user_config,
-                                        apply_hostname_config)
+                                        apply_hostname_config, run_git_update)
 
 config_page = Blueprint('config_page', __name__,
                         template_folder='templates',
@@ -226,6 +226,11 @@ def conf():
         # the existing /api/reboot endpoint after this returns success.
         new_hostname = request.form.get('host-hostname', '')
         success, msg = apply_hostname_config(new_hostname)
+        return jsonify({'result': success, 'message': msg}), (200 if success else 400)
+
+    # --- 5. Advanced: Software Update (git pull) ---
+    if request.form.get('action') == 'update_app':
+        success, msg = run_git_update()
         return jsonify({'result': success, 'message': msg}), (200 if success else 400)
 
     # Calculate initial autofocus visibility state for the template

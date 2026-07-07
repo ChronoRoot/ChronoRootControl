@@ -7,6 +7,7 @@ import subprocess
 import socket
 
 USER_CONFIG_PATH = '/srv/ChronoRootControl/user_config.py'
+REPO_DIR = '/srv/ChronoRootControl'
 
 # RFC 952/1123 single-label hostname: 1-63 chars, alphanumeric + hyphens,
 # no leading/trailing hyphen.
@@ -150,3 +151,68 @@ def apply_hostname_config(new_hostname):
         return False, f"raspi-config failed (code {result.returncode}): {err or 'unknown error'}"
 
     return True, f"Hostname staged as '{new_hostname}'. It takes effect after the next reboot."
+
+def run_git_update():
+    """
+    Runs a plain 'git pull' inside REPO_DIR and returns (success, message) with a
+    human-readable summary of what happened.
+
+    Classifies the common outcomes explicitly:
+    - already up to date
+    - updated successfully (with a short summary of the pull)
+    - no internet / remote unreachable
+    - blocked by local changes or a diverged branch (manual intervention)
+    - any other git failure
+    """
+    # Never let git block waiting for interactive input: disable the credential
+    # prompt (HTTPS) and force SSH into batch mode. Combined with the timeout,
+    # this guarantees the call returns instead of hanging on a private repo.
+    env = dict(os.environ)
+    env['GIT_TERMINAL_PROMPT'] = '0'
+    env['GIT_SSH_COMMAND'] = 'ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new'
+
+    # Failsafe for "detected dubious ownership": the service runs as root while
+    # the repo is owned by the user (or vice versa). Inject safe.directory for
+    # THIS command only via -c, so we never mutate any global git config.
+    try:
+        result = subprocess.run(
+            ['git', '-c', f'safe.directory={REPO_DIR}', '-C', REPO_DIR, 'pull', '--ff-only'],
+            capture_output=True, text=True, timeout=120, env=env
+        )
+    except subprocess.TimeoutExpired:
+        return False, ("The update timed out after 2 minutes. This usually means a slow "
+                       "or dropped internet connection. Please try again.")
+    except FileNotFoundError:
+        return False, "git is not installed on this system, so the app cannot self-update."
+
+    out = (result.stdout or '').strip()
+    err = (result.stderr or '').strip()
+    combined = '\n'.join(part for part in (out, err) if part).strip()
+    low = combined.lower()
+
+    if result.returncode == 0:
+        if 'already up to date' in low or 'already up-to-date' in low:
+            return True, "You are already running the latest version. No update was needed."
+        summary = out or "Changes were pulled from the remote repository."
+        return True, ("Update successful! The latest code has been pulled.\n\n"
+                       f"{summary}\n\nRestart the services or reboot to run the new version.")
+
+    network_markers = [
+        'could not resolve host', 'unable to access', 'connection timed out',
+        'could not read from remote repository', 'network is unreachable',
+        'temporary failure in name resolution', 'failed to connect', 'connection refused',
+    ]
+    if any(marker in low for marker in network_markers):
+        return False, ("No internet connection detected. The device could not reach the "
+                       "remote repository. Check the network and try again.")
+
+    conflict_markers = [
+        'would be overwritten', 'local changes', 'not possible to fast-forward',
+        'diverging', 'non-fast-forward', 'unmerged', 'needs merge',
+    ]
+    if any(marker in low for marker in conflict_markers):
+        return False, ("Update blocked: this device has local changes or its branch has "
+                        "diverged from the remote. Manual intervention is required.\n\n"
+                        f"{combined}")
+
+    return False, f"Update failed (git exit code {result.returncode}):\n\n{combined or 'Unknown error.'}"

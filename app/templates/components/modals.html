@@ -1,19 +1,23 @@
-<div aria-live="polite" aria-atomic="true" style="position: fixed; top: 20px; right: 20px; z-index: 9999; pointer-events: none;">
-    <div id="appToast" class="toast border shadow-lg" role="alert" aria-live="assertive" aria-atomic="true" data-autohide="true" style="min-width: 300px; pointer-events: auto;">
-        <div class="toast-header bg-light text-dark border-bottom">
-            <i id="toastIcon" class="fas fa-info-circle mr-2"></i>
-            <strong class="mr-auto" id="toastTitle">Notification</strong>
-            <button type="button" class="ml-2 mb-1 close" data-dismiss="toast" aria-label="Close">
-                <span aria-hidden="true">&times;</span>
-            </button>
-        </div>
-        <div class="toast-body bg-white text-center py-4">
-            <div id="toastMessage" class="mb-4" style="font-size: 1.05rem;"></div>
-            <div>
-                <button type="button" class="btn btn-dark px-5 font-weight-bold" data-dismiss="toast">Accept</button>
-            </div>
-        </div>
+<!-- Centered notification modal: requires an explicit "Accept" so the user
+     always reads the full message (it never auto-dismisses). -->
+<div class="modal fade" id="appAlertModal" tabindex="-1" aria-hidden="true" role="alert" style="z-index: 10000;">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content shadow-lg border-0">
+      <div class="modal-header bg-light text-dark border-bottom py-3">
+        <h5 class="modal-title mb-0">
+          <i id="toastIcon" class="fas fa-info-circle mr-2"></i>
+          <span id="toastTitle">Notification</span>
+        </h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div id="toastMessage" class="modal-body bg-white text-center py-4" style="font-size: 1.05rem;"></div>
+      <div class="modal-footer border-top bg-light justify-content-center py-2">
+        <button type="button" class="btn btn-dark px-5 font-weight-bold" data-dismiss="modal">Accept</button>
+      </div>
     </div>
+  </div>
 </div>
 
 <div class="modal fade" id="customConfirmModal" tabindex="-1" aria-hidden="true" style="z-index: 9998;">
@@ -59,7 +63,8 @@
         }
 
         toastMsg.html(message.replace(/\n/g, '<br>'));
-        $('#appToast').toast('show');
+        // Centered modal that stays until the user clicks "Accept".
+        $('#appAlertModal').modal('show');
     }
 
     function asyncConfirm(title, message, isDanger = false) {
