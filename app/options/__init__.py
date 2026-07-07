@@ -230,8 +230,8 @@ def conf():
 
     # --- 5. Advanced: Software Update (git pull) ---
     if request.form.get('action') == 'update_app':
-        success, msg = run_git_update()
-        return jsonify({'result': success, 'message': msg}), (200 if success else 400)
+        success, msg, changed = run_git_update()
+        return jsonify({'result': success, 'message': msg, 'changed': changed}), (200 if success else 400)
 
     # --- 6. Restart services (lands back on this page after ~10s) ---
     if request.form.get('action') == 'restart_services':

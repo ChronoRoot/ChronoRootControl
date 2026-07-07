@@ -761,10 +761,10 @@
             const response = await fetch(window.location.href, { method: 'POST', body: new FormData(form) });
             const data = await response.json();
 
-            if (data.result) {
-                // On success, offer to restart services. Clicking submits this same
-                // form with action=restart_services, which renders restarting.html
-                // (it restarts the service and returns here after ~10s).
+            if (data.result && data.changed) {
+                // New code was pulled: offer to restart services. Clicking submits
+                // this same form with action=restart_services, which renders
+                // restarting.html (restarts the service, returns here after ~10s).
                 showToast(data.message, 'success', {
                     label: '<i class="fas fa-sync-alt mr-2"></i> Restart Services',
                     onClick: function () {
@@ -773,7 +773,8 @@
                     }
                 });
             } else {
-                showToast(data.message, 'danger');
+                // Already up to date (or a failure): just acknowledge with "Accept".
+                showToast(data.message, data.result ? 'success' : 'danger');
             }
         } catch (error) {
             console.error("Software update failed", error);

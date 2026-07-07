@@ -842,11 +842,14 @@ def update_software():
     None
 
     Returns:
-        200 OK: {"result": True, "message": "<up-to-date | pulled summary>"}
-        400 Bad Request: {"result": False, "message": "<no internet | blocked | git error>"}
+        200 OK: {"result": True, "changed": <bool>, "message": "<up-to-date | pulled summary>"}
+        400 Bad Request: {"result": False, "changed": False, "message": "<no internet | blocked | git error>"}
+
+    ``changed`` is True only when new code was actually pulled (False when already
+    up to date), so the fleet manager knows whether a restart/reboot is needed.
     """
-    success, msg = run_git_update()
-    return jsonify({'result': success, 'message': msg}), (200 if success else 400)
+    success, msg, changed = run_git_update()
+    return jsonify({'result': success, 'message': msg, 'changed': changed}), (200 if success else 400)
 
 # =====================================================================
 # 5. DATA SYNCHRONIZATION (BACKGROUND WORKERS)

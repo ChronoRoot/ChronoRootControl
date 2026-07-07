@@ -154,8 +154,13 @@ def apply_hostname_config(new_hostname):
 
 def run_git_update():
     """
-    Runs a plain 'git pull' inside REPO_DIR and returns (success, message) with a
-    human-readable summary of what happened.
+    Runs a plain 'git pull' inside REPO_DIR and returns
+    (success, message, changed) with a human-readable summary of what happened.
+
+    - success: the pull ran without error.
+    - changed: new code was actually pulled (False when already up to date, or
+      on any failure). Callers use this to decide whether a service restart is
+      needed.
 
     Classifies the common outcomes explicitly:
     - already up to date
@@ -181,9 +186,9 @@ def run_git_update():
         )
     except subprocess.TimeoutExpired:
         return False, ("The update timed out after 2 minutes. This usually means a slow "
-                       "or dropped internet connection. Please try again.")
+                       "or dropped internet connection. Please try again."), False
     except FileNotFoundError:
-        return False, "git is not installed on this system, so the app cannot self-update."
+        return False, "git is not installed on this system, so the app cannot self-update.", False
 
     out = (result.stdout or '').strip()
     err = (result.stderr or '').strip()
@@ -192,10 +197,10 @@ def run_git_update():
 
     if result.returncode == 0:
         if 'already up to date' in low or 'already up-to-date' in low:
-            return True, "You are already running the latest version. No update was needed."
+            return True, "You are already running the latest version. No update was needed.", False
         summary = out or "Changes were pulled from the remote repository."
         return True, ("Update successful! The latest code has been pulled.\n\n"
-                       f"{summary}\n\nRestart the services or reboot to run the new version.")
+                       f"{summary}\n\nRestart the services or reboot to run the new version."), True
 
     network_markers = [
         'could not resolve host', 'unable to access', 'connection timed out',
@@ -204,7 +209,7 @@ def run_git_update():
     ]
     if any(marker in low for marker in network_markers):
         return False, ("No internet connection detected. The device could not reach the "
-                       "remote repository. Check the network and try again.")
+                       "remote repository. Check the network and try again."), False
 
     conflict_markers = [
         'would be overwritten', 'local changes', 'not possible to fast-forward',
@@ -213,6 +218,6 @@ def run_git_update():
     if any(marker in low for marker in conflict_markers):
         return False, ("Update blocked: this device has local changes or its branch has "
                         "diverged from the remote. Manual intervention is required.\n\n"
-                        f"{combined}")
+                        f"{combined}"), False
 
-    return False, f"Update failed (git exit code {result.returncode}):\n\n{combined or 'Unknown error.'}"
+    return False, f"Update failed (git exit code {result.returncode}):\n\n{combined or 'Unknown error.'}", False
