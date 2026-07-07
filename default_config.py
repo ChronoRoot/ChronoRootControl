@@ -94,6 +94,12 @@ class Config(object):
 
     LOCK_FILE = "/tmp/cam.lock"
     LOCK_TIMEOUT = 5
+    # Live preview stall watchdog: if the stream thread produces no frame for this
+    # many seconds, the camera is force-closed so the hardware lock is released.
+    STREAM_STALL_TIMEOUT = 15
+    # Minutes a "User (Web Interface)" live-preview lock may be held before the
+    # dashboard flags it as stuck (humans may legitimately focus for a while).
+    USER_LOCK_ALLOWANCE = 30
 
     MAX_WAIT = 100 # time to wait to another experience to terminate, min 5
     IR_GPIO = 32

@@ -1,9 +1,8 @@
 """
 Live preview from camera
 """
-from ..options.form import BackLightForm
 import os
-from flask import Blueprint, render_template, url_for, Response, jsonify, request, redirect
+from flask import Blueprint, render_template, Response, jsonify, request
 
 from phototron.streamer import CameraStream
 from phototron.rpimodule import RpiModule
@@ -17,7 +16,7 @@ focus_page = Blueprint('focus_page', __name__,
                        template_folder='templates',
                        static_folder='static')
 
-@focus_page.route('/<int:cam_id>', methods=['GET', 'POST'])
+@focus_page.route('/<int:cam_id>', methods=['GET'])
 def index(cam_id):
     """Video streaming home page."""
     rpi = RpiModule()
@@ -36,27 +35,18 @@ def index(cam_id):
     
     has_hw_error = cam_health in ['ERROR', 'NOT DETECTED']
 
-    backlight_form = BackLightForm(ir=(light.state == light.ON), prefix="backlight")
-    
     cam_profile = Config.CAMERA_PROFILES.get(Config.CAMERA_TYPE, {})
     has_autofocus = cam_profile.get("autofocus", False)
     saved_distances = getattr(Config, 'FOCUS_DISTANCES', {})
     saved_focus = saved_distances.get(str(cam_id), 7.5)
-    
-    if backlight_form.validate_on_submit():
-        if backlight_form.ir.data:
-            light.state = light.ON
-            status_mgr.update_lights_state("ON")
-        else:
-            light.state = light.OFF
-            status_mgr.update_lights_state("OFF")
 
-        return redirect(url_for('focus_page.index', cam_id=cam_id))
+    # NOTE: the light is toggled exclusively via the AJAX endpoint
+    # /api/toggle_light. The old POST-and-redirect form path was removed because
+    # the redirect re-created the CameraStream mid-preview and raced the lock.
 
     return render_template('focus.html', 
             cam_id=cam_id,
             light_state=(light.state == light.ON),
-            backlight_form=backlight_form,
             is_locked=is_locked,
             lock_owner=lock_owner,
             has_hw_error=has_hw_error,
@@ -108,7 +98,20 @@ def toggle_light():
     rpi = RpiModule()
     light = rpi.light
     status_mgr = SchedulerStatus()
-    
+
+    # Lock awareness: refuse to drive the GPIO while the scheduler or a system
+    # task (diagnostics, capture) holds the hardware. Toggling during the user's
+    # own live preview is allowed -- that is the intended focusing workflow.
+    lock_info = status_mgr.state.get("hardware", {}).get("lock_info", {})
+    lock_status = lock_info.get("status")
+    lock_owner = lock_info.get("owner") or "Unknown Process"
+    if lock_status == "LOCKED" and lock_owner != "User (Web Interface)":
+        logger.warning(f"Light toggle refused: hardware locked by {lock_owner}.")
+        return jsonify({
+            "success": False,
+            "error": f"Hardware busy: {lock_owner} is using the cameras. Try again shortly."
+        }), 409
+
     # Get the requested state from the JSON payload
     data = request.get_json()
     turn_on = data.get('ir_state', False)

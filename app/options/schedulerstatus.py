@@ -571,22 +571,36 @@ class SchedulerStatus(object):
         lock_info = data["hardware"]["lock_info"]
         is_user_stream = lock_info.get("owner") == "User (Web Interface)"
         
-        if lock_info.get("status") == "LOCKED" and lock_info.get("acquired_at") and not is_user_stream:
+        if lock_info.get("status") == "LOCKED" and lock_info.get("acquired_at"):
             try:
                 acquired_time = datetime.strptime(lock_info["acquired_at"], Config.PRETTY_FORMAT)
                 lock_hold_duration = (now - acquired_time).total_seconds()
                 
-                per_camera_allowance = Config.PER_CAMERA_ALLOWANCE * 60 
-                num_cameras = len(Config.CAMS) 
-                max_allowed = per_camera_allowance * num_cameras
-                
-                if lock_hold_duration > max_allowed: 
-                    alerts["lock_stuck"] = True
-                    alerts["has_warnings"] = True
-                    alerts["issues"].append(
-                        f"Hardware lock held too long ({int(lock_hold_duration // 60)} mins). "
-                        f"Max allowed for {num_cameras} cams is {int(max_allowed // 60)} mins."
-                    )
+                if is_user_stream:
+                    # Live previews get their own (longer) allowance: a human may
+                    # legitimately spend a while focusing, but a preview lock held
+                    # for longer than this is almost certainly stale/hung.
+                    max_allowed = getattr(Config, 'USER_LOCK_ALLOWANCE', 30) * 60
+                    if lock_hold_duration > max_allowed:
+                        alerts["lock_stuck"] = True
+                        alerts["has_warnings"] = True
+                        alerts["issues"].append(
+                            f"Stale live-preview lock: held by the web interface for "
+                            f"{int(lock_hold_duration // 60)} mins (max {int(max_allowed // 60)} mins). "
+                            f"The preview stream may have hung."
+                        )
+                else:
+                    per_camera_allowance = Config.PER_CAMERA_ALLOWANCE * 60 
+                    num_cameras = len(Config.CAMS) 
+                    max_allowed = per_camera_allowance * num_cameras
+                    
+                    if lock_hold_duration > max_allowed: 
+                        alerts["lock_stuck"] = True
+                        alerts["has_warnings"] = True
+                        alerts["issues"].append(
+                            f"Hardware lock held too long ({int(lock_hold_duration // 60)} mins). "
+                            f"Max allowed for {num_cameras} cams is {int(max_allowed // 60)} mins."
+                        )
             except Exception as e:
                 if self.log: self.log.error(f"Error calculating lock time: {e}")
 
