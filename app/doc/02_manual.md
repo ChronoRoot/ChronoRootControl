@@ -20,6 +20,8 @@ Before starting a new experiment, you should prepare your hardware here. This pa
 * **Routine Initialization:** Ensure your system clock is correct (crucial for accurate timestamps) and run a **Hardware Scan**. The scan probes the multiplexer and ensures all connected cameras are responding.
 * **Camera Calibration:** Turn the IR Backlight ON or OFF to match your growth chamber conditions. Use the **Live Focus** button to stream a real-time feed from a specific camera, allowing you to manually adjust the physical lens until the plate is perfectly sharp.
 * **Advanced Hardware Configuration:** Set your multiplexer type and camera sensor model (e.g., V2, V3). Incorrect settings here will cause the hardware scan to fail.
+* **Software Update:** Pulls the latest ChronoRoot code from the repository (a `git pull` against `/srv/ChronoRootControl`). It needs an internet connection and reports the outcome clearly — already up to date, updated, no internet, or blocked by local changes. Restart the services or reboot afterwards to run the new version. This same action is exposed to the Fleet Commander via `POST /api/update`.
+* **Device Hostname:** Rename the module on the network. The change is staged safely through `raspi-config` (which updates both `/etc/hostname` and `/etc/hosts`, so the Pi can always resolve its own name and `sudo` never hangs) and only takes effect after a reboot, which is triggered automatically once you confirm. After about a minute the module comes back at `http://<new-name>.local`.
 
 ## 3. Creating an Experiment
 

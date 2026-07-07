@@ -498,6 +498,36 @@ def poll_module(base_url: str) -> dict:
 
 ---
 
+## Software updates (`POST /api/update`)
+
+Pull the latest application code onto a module without touching the terminal. This is the endpoint the Fleet Commander uses to update the whole fleet. It runs `git pull --ff-only` inside the deployment directory (`/srv/ChronoRootControl`) and returns a classified, human-readable result.
+
+The call is hardened so it can **never hang a worker**:
+
+- 120s hard timeout on the git subprocess.
+- `GIT_TERMINAL_PROMPT=0` and SSH `BatchMode=yes` — git fails fast instead of blocking on a credential or host-key prompt.
+- `-c safe.directory=<repo>` is injected per-call, so the common "detected dubious ownership" error (the service runs as root while the repo is owned by the user) is handled without editing any global git config.
+
+No payload is required.
+
+```bash
+curl -X POST http://<module-ip>/api/update
+```
+
+Outcomes:
+
+| Result | HTTP | `message` |
+|--------|------|-----------|
+| Already current | 200 | "You are already running the latest version…" |
+| Updated | 200 | "Update successful! …" plus the `git pull` summary |
+| No internet | 400 | "No internet connection detected…" |
+| Blocked | 400 | Local changes or a diverged branch — manual intervention required |
+| Git error | 400 | Raw git error and exit code |
+
+The pulled code takes effect only after the services restart or the Pi reboots. Follow a successful update with `GET /api/restart_service` (fast) or `POST /api/reboot` (full restart).
+
+---
+
 ## Other endpoints
 
 | Method | Path | Notes |
@@ -506,6 +536,7 @@ def poll_module(base_url: str) -> dict:
 | GET | `/api/config` | Read module configuration. |
 | PUT | `/api/config` | Update configuration. |
 | POST | `/api/sync/trigger` | Manual rclone sync. |
+| POST | `/api/update` | Pull latest code (`git pull`); restart/reboot to apply. |
 | POST | `/api/reboot` | Reboot module (use with care). |
 
 Endpoint-level schema detail also appears in the docstrings of `app/api.py` in the source tree.

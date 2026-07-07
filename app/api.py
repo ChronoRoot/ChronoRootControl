@@ -22,7 +22,7 @@ from config import Config
 from app.experiment.models import Experiment
 from app.experimentlist.models import ExperimentList
 from app.options.schedulerstatus import SchedulerStatus
-from app.options.config_manager import save_user_config, apply_system_time_config
+from app.options.config_manager import save_user_config, apply_system_time_config, run_git_update
 from app.sync.manager import setup_rclone_remote, test_rclone_connection
 from phototron.rpimodule import RpiModule
 
@@ -815,6 +815,38 @@ def restart_service():
     """
     subprocess.Popen('(sleep 1; sudo systemctl restart uwsgi) &', shell=True)
     return "Restarting..."
+
+
+@api_exp.route('/update', methods=['POST'])
+def update_software():
+    """
+    Pull the latest application code from the git remote (fleet-wide software update).
+
+    **Endpoint:** ``POST /api/update``
+
+    Runs ``git pull --ff-only`` inside the deployment directory
+    (``/srv/ChronoRootControl``) and returns a classified, human-readable result.
+    Intended for the Fleet Commander to update modules headlessly. The call is
+    hardened so it can never hang the worker:
+
+    - A 120s hard timeout on the subprocess.
+    - ``GIT_TERMINAL_PROMPT=0`` and SSH ``BatchMode=yes`` so git fails fast instead
+      of blocking on credential/host-key prompts.
+    - ``-c safe.directory=<repo>`` injected per-call to tolerate the root-vs-user
+      ownership mismatch without mutating any global git config.
+
+    The new code takes effect only after the services restart or the Pi reboots
+    (``GET /api/restart_service`` or ``POST /api/reboot``).
+
+    Expected JSON Payload:
+    None
+
+    Returns:
+        200 OK: {"result": True, "message": "<up-to-date | pulled summary>"}
+        400 Bad Request: {"result": False, "message": "<no internet | blocked | git error>"}
+    """
+    success, msg = run_git_update()
+    return jsonify({'result': success, 'message': msg}), (200 if success else 400)
 
 # =====================================================================
 # 5. DATA SYNCHRONIZATION (BACKGROUND WORKERS)
