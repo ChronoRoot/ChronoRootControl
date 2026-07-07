@@ -129,6 +129,20 @@ class RpiModule(object):
             return False, None, str(e)
         
     @staticmethod
+    def _experiment_stopped(xpid, status_manager):
+        """True when the experiment was cancelled or finished (disk or RAM tombstone)."""
+        try:
+            exp = Experiment.load_from_id(xpid)
+            if exp.status in ("CANCELLED", "FINISHED"):
+                return True
+        except Exception:
+            pass
+        status_manager.load()
+        if xpid in status_manager.state.get("cancelled_experiments", []):
+            return True
+        return False
+
+    @staticmethod
     def take_picture(xpid, status_manager):
         
         def report(cam_id=None, cam_status=None, last_pic=False):
@@ -145,6 +159,10 @@ class RpiModule(object):
             rpi.exp_logger.error(f"Experiment {xpid} not found or failed to load.")
             raise RuntimeError(f"Experiment {xpid} not found or failed to load.")
 
+        if RpiModule._experiment_stopped(xpid, status_manager):
+            rpi.exp_logger.info(f"Skipping capture for {xpid}: experiment is cancelled or finished.")
+            return False
+
         # --- Main Retry Loop (For Lock Only) ---
         retries = 0
         while retries < Config.CAM_RETRIES:
@@ -154,6 +172,10 @@ class RpiModule(object):
                     status_manager.update_lock_state("LOCKED", "Scheduler", f"Exp {xpid}")
 
                     try:
+                        if RpiModule._experiment_stopped(xpid, status_manager):
+                            rpi.exp_logger.info(f"Aborting capture for {xpid}: cancelled while waiting for lock.")
+                            return False
+
                         # 1. Lights ON
                         if exp.ir:
                             rpi.light.state = Light.ON
@@ -170,8 +192,12 @@ class RpiModule(object):
                         
                         # 2. Iterate Cameras
                         for camera in exp.cameras:
-                            if camera not in Config.CAMS: continue 
-                            
+                            if camera not in Config.CAMS:
+                                continue
+                            if RpiModule._experiment_stopped(xpid, status_manager):
+                                rpi.exp_logger.info(f"Aborting capture for {xpid}: cancelled mid-round.")
+                                return False
+
                             success, data, error = rpi._capture_single_camera(camera, xpid, exp.img_params, report)
                             
                             if success:
@@ -222,7 +248,7 @@ class RpiModule(object):
                             }
                             status_manager.write()
                         
-                            if exp.status != "ERROR":
+                            if exp.status not in ("ERROR", "CANCELLED", "FINISHED"):
                                 exp.status = "ERROR"
                                 exp.message = msg
                                 exp.save()

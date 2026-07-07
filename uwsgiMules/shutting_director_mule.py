@@ -97,13 +97,14 @@ def shed_evt_job_error(event):
     error_msg = str(getattr(event, 'exception', 'Job missed scheduled run.'))
     exp.log_event(error_msg)
     
-    if exp.status != "ERROR":
+    if exp.status not in ("ERROR", "CANCELLED", "FINISHED"):
         timestamp = datetime.now().strftime(Config.PRETTY_FORMAT)
         exp.status = "ERROR"
         exp.message = f"Job Failed at {timestamp}: {error_msg}"
         exp.save()
 
-    scheduler_status.set_exp_status(event.job_id, "ERROR")
+    if exp.status not in ("CANCELLED", "FINISHED"):
+        scheduler_status.set_exp_status(event.job_id, "ERROR")
     log.error(f"Experiment {exp.expid} failed. Status set to ERROR.")
 
     # --- THE FIX: Mark as finished if the time has come ---
@@ -433,6 +434,8 @@ class ChiefOperator(object):
                 self.schedule_job(xpid)
             elif action == 'CANCEL':
                 self.cancel_job(xpid)
+            elif action == 'UPDATE':
+                self.update_job(xpid)
             elif action == 'CHECK_HARDWARE':
                 self.check_hardware(xpid)
             elif action == 'TEST_CAMERA':
@@ -499,7 +502,12 @@ class ChiefOperator(object):
 
     def schedule_job(self, exp_id):
         exp = load_exp_safe(exp_id)
-        if not exp: return
+        if not exp:
+            return
+
+        if exp.status in ("CANCELLED", "FINISHED"):
+            self.logger.info(f"Skipping schedule for terminal experiment {exp_id} (status={exp.status})")
+            return
 
         start_dt = exp.start
         end_dt = exp.end
@@ -574,6 +582,8 @@ class ChiefOperator(object):
     def cancel_job(self, expid):
         exp = load_exp_safe(expid)
         if exp:
+            if exp.status not in ("CANCELLED", "FINISHED"):
+                exp.log_event("Experiment cancelled by user.")
             exp.status = "CANCELLED"
             exp.message = "Cancelled by user."
             exp.save()
@@ -582,12 +592,25 @@ class ChiefOperator(object):
         cancelled = scheduler_status.state.setdefault("cancelled_experiments", [])
         if expid not in cancelled:
             cancelled.append(expid)
+        scheduler_status.write()
 
         if scheduler.get_job(expid):
             scheduler.remove_job(expid)
-            
+
         scheduler_status.remove_experiment(expid)
         self.logger.info(f"Cancelled {expid}")
+
+    def update_job(self, expid):
+        exp = load_exp_safe(expid)
+        if not exp:
+            return
+        if exp.status in ("CANCELLED", "FINISHED"):
+            self.logger.info(f"Skipping UPDATE for terminal experiment {expid}")
+            return
+        if scheduler.get_job(expid):
+            scheduler.remove_job(expid)
+        self.schedule_job(expid)
+        self.logger.info(f"Updated scheduler job for {expid}")
 
     def check_hardware(self, xpid):
         self.logger.info("Running Hardware Diagnostic (Immediate)...")

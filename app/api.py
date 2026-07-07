@@ -464,6 +464,8 @@ def delete_experiment(expid):
         exp = Experiment.load_from_id(expid)
     except FileNotFoundError:
         abort(404)
+    if exp.status not in ("CANCELLED", "FINISHED"):
+        exp.cancel()
     exp.delete()
     return jsonify({'result': True})
 
@@ -483,15 +485,12 @@ def cancel_experiment(expid):
         200 OK: The updated experiment JSON dictionary showing status="CANCELLED".
         404 Not Found: If the requested expid does not exist.
     """
-    print(f"DEBUG: Cancel requested for {expid}") 
     try:
         exp = Experiment.load_from_id(expid)
-        print(f"DEBUG: Current status before cancel: {exp.status}")
     except FileNotFoundError:
         abort(404)
-    
+
     exp.cancel()
-    print(f"DEBUG: Status after cancel(): {exp.status}")
     return jsonify(exp.to_dict())
 
 @api_exp.errorhandler(404)

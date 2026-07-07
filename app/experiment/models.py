@@ -260,12 +260,12 @@ class Experiment(object):
         message = {'id': self.expid, 'action': 'CREATE'}
         uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
 
-    def cancel(self):        
-        message = {'id': self.expid, 'action': 'CANCEL'}
-        uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
-        
+    def cancel(self):
+        if self.status in ("CANCELLED", "FINISHED"):
+            return
+
         self.status = "CANCELLED"
-        self.message = "Stop requested by user."
+        self.message = "Cancelled by user."
         self.log_event("Experiment cancelled by user.")
         self.save()
 
@@ -280,6 +280,9 @@ class Experiment(object):
         mgr.write()
 
         self.status_update()
+
+        message = {'id': self.expid, 'action': 'CANCEL'}
+        uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
 
     def delete(self):
         if self.status in ("CANCELLED", "FINISHED"):

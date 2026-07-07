@@ -17,3 +17,4 @@ log
 venv
 node_modules
 .cache
+tests/
