@@ -760,8 +760,21 @@
         try {
             const response = await fetch(window.location.href, { method: 'POST', body: new FormData(form) });
             const data = await response.json();
-            // showToast is now a centered dialog that stays until the user clicks Accept.
-            showToast(data.message, data.result ? 'success' : 'danger');
+
+            if (data.result) {
+                // On success, offer to restart services. Clicking submits this same
+                // form with action=restart_services, which renders restarting.html
+                // (it restarts the service and returns here after ~10s).
+                showToast(data.message, 'success', {
+                    label: '<i class="fas fa-sync-alt mr-2"></i> Restart Services',
+                    onClick: function () {
+                        form.querySelector('input[name="action"]').value = 'restart_services';
+                        form.submit();
+                    }
+                });
+            } else {
+                showToast(data.message, 'danger');
+            }
         } catch (error) {
             console.error("Software update failed", error);
             showToast("Network error while contacting the server for the update.", "danger");

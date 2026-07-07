@@ -14,7 +14,8 @@
       </div>
       <div id="toastMessage" class="modal-body bg-white text-center py-4" style="font-size: 1.05rem;"></div>
       <div class="modal-footer border-top bg-light justify-content-center py-2">
-        <button type="button" class="btn btn-dark px-5 font-weight-bold" data-dismiss="modal">Accept</button>
+        <button type="button" id="alertActionBtn" class="btn btn-success px-4 font-weight-bold" style="display: none;"></button>
+        <button type="button" id="alertAcceptBtn" class="btn btn-dark px-5 font-weight-bold" data-dismiss="modal">Accept</button>
       </div>
     </div>
   </div>
@@ -43,7 +44,10 @@
 <script>
     // --- GLOBAL UI ENGINE (jQuery / BS4) ---
     
-    function showToast(message, type = 'success') {
+    // `action` (optional): { label: '<html>', onClick: fn }. When provided, the
+    // default "Accept" button is swapped for a custom action button (e.g. one
+    // that navigates to the service-restart page).
+    function showToast(message, type = 'success', action = null) {
         const toastTitle = $('#toastTitle');
         const toastMsg = $('#toastMessage');
         const toastIcon = $('#toastIcon');
@@ -63,7 +67,23 @@
         }
 
         toastMsg.html(message.replace(/\n/g, '<br>'));
-        // Centered modal that stays until the user clicks "Accept".
+
+        const acceptBtn = $('#alertAcceptBtn');
+        const actionBtn = $('#alertActionBtn');
+        actionBtn.off('click');
+
+        if (action) {
+            acceptBtn.hide();
+            actionBtn.html(action.label).show().on('click', function () {
+                $('#appAlertModal').modal('hide');
+                if (typeof action.onClick === 'function') action.onClick();
+            });
+        } else {
+            actionBtn.hide();
+            acceptBtn.show();
+        }
+
+        // Centered modal that stays until the user clicks a button.
         $('#appAlertModal').modal('show');
     }
 

@@ -233,6 +233,10 @@ def conf():
         success, msg = run_git_update()
         return jsonify({'result': success, 'message': msg}), (200 if success else 400)
 
+    # --- 6. Restart services (lands back on this page after ~10s) ---
+    if request.form.get('action') == 'restart_services':
+        return render_template('restarting.html', target_url=url_for('config_page.conf'))
+
     # Calculate initial autofocus visibility state for the template
     current_profile = Config.CAMERA_PROFILES.get(getattr(Config, 'CAMERA_TYPE', 'RPICAM_V2'), {})
     has_autofocus = current_profile.get("autofocus", False)
