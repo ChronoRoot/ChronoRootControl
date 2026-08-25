@@ -364,6 +364,40 @@ def create_experiment():
     exp.create()
     return jsonify(exp.to_dict()), 201
 
+@api_exp.route('/update', methods=['POST'])
+def update_software():
+    """
+    Pull the latest application code from the git remote (fleet-wide software update).
+
+    **Endpoint:** ``POST /api/update``
+
+    Runs ``git pull --ff-only`` inside the deployment directory
+    (``/srv/ChronoRootControl``) and returns a classified, human-readable result.
+    Intended for the Fleet Commander to update modules headlessly. The call is
+    hardened so it can never hang the worker:
+
+    - A 120s hard timeout on the subprocess.
+    - ``GIT_TERMINAL_PROMPT=0`` and SSH ``BatchMode=yes`` so git fails fast instead
+      of blocking on credential/host-key prompts.
+    - ``-c safe.directory=<repo>`` injected per-call to tolerate the root-vs-user
+      ownership mismatch without mutating any global git config.
+
+    The new code takes effect only after the services restart or the Pi reboots
+    (``GET /api/restart_service`` or ``POST /api/reboot``).
+
+    Expected JSON Payload:
+    None
+
+    Returns:
+        200 OK: {"result": True, "changed": <bool>, "message": "<up-to-date | pulled summary>"}
+        400 Bad Request: {"result": False, "changed": False, "message": "<no internet | blocked | git error>"}
+
+    ``changed`` is True only when new code was actually pulled (False when already
+    up to date), so the fleet manager knows whether a restart/reboot is needed.
+    """
+    success, msg, changed = run_git_update()
+    return jsonify({'result': success, 'message': msg, 'changed': changed}), (200 if success else 400)
+
 @api_exp.route('/<expid>', methods=['GET'])
 def get_experiment(expid):
     """
@@ -816,40 +850,6 @@ def restart_service():
     subprocess.Popen('(sleep 1; sudo systemctl restart uwsgi) &', shell=True)
     return "Restarting..."
 
-
-@api_exp.route('/update', methods=['POST'])
-def update_software():
-    """
-    Pull the latest application code from the git remote (fleet-wide software update).
-
-    **Endpoint:** ``POST /api/update``
-
-    Runs ``git pull --ff-only`` inside the deployment directory
-    (``/srv/ChronoRootControl``) and returns a classified, human-readable result.
-    Intended for the Fleet Commander to update modules headlessly. The call is
-    hardened so it can never hang the worker:
-
-    - A 120s hard timeout on the subprocess.
-    - ``GIT_TERMINAL_PROMPT=0`` and SSH ``BatchMode=yes`` so git fails fast instead
-      of blocking on credential/host-key prompts.
-    - ``-c safe.directory=<repo>`` injected per-call to tolerate the root-vs-user
-      ownership mismatch without mutating any global git config.
-
-    The new code takes effect only after the services restart or the Pi reboots
-    (``GET /api/restart_service`` or ``POST /api/reboot``).
-
-    Expected JSON Payload:
-    None
-
-    Returns:
-        200 OK: {"result": True, "changed": <bool>, "message": "<up-to-date | pulled summary>"}
-        400 Bad Request: {"result": False, "changed": False, "message": "<no internet | blocked | git error>"}
-
-    ``changed`` is True only when new code was actually pulled (False when already
-    up to date), so the fleet manager knows whether a restart/reboot is needed.
-    """
-    success, msg, changed = run_git_update()
-    return jsonify({'result': success, 'message': msg, 'changed': changed}), (200 if success else 400)
 
 # =====================================================================
 # 5. DATA SYNCHRONIZATION (BACKGROUND WORKERS)
