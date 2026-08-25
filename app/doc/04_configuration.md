@@ -85,6 +85,6 @@ The standard installation writes application logs to `/srv/ChronoRootControl/log
 
 The panel reads only these configured files and the watchdog reboot record; it is not a general filesystem browser. Log output is bounded to the newest portion so opening a large file does not exhaust Raspberry Pi memory.
 
-Application logs cannot record a process that is killed by the kernel. The service and journal views therefore include uWSGI, nginx, the multiplexer boot fix, and kernel warnings. Use the kernel view to diagnose OOM kills, camera-driver failures, I2C errors, and power/undervoltage warnings.
+Application logs cannot record a process that is killed by the kernel. The service and journal views therefore include uWSGI, nginx, the multiplexer boot fix, and kernel warnings. The default kernel view filters routine Raspberry Pi boot noise and keeps OOM kills, camera/I2C failures, filesystem faults, hangs, thermal events, and power/undervoltage warnings. **Raw kernel warnings** remains available when the complete boot journal is needed.
 
 Log cleanup is manual. **Clear log** truncates the selected application log in place after confirmation, preserving the file used by active logger processes. The watchdog reboot record cannot be cleared from the interface because it enforces the automatic-reboot circuit breaker.

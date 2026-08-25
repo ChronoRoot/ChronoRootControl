@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import datetime
 import os
+import re
 import resource
 import subprocess
 import tempfile
@@ -43,7 +44,21 @@ JOURNAL_SOURCES = {
     # Kernel warnings capture OOM kills, camera-driver errors, I2C faults and
     # undervoltage messages that cannot reach Python file handlers.
     "kernel": ["journalctl", "--no-pager", "-n", "250", "-o", "short-iso", "-k", "-p", "warning..alert"],
+    "kernel_raw": ["journalctl", "--no-pager", "-n", "250", "-o", "short-iso", "-k", "-p", "warning..alert"],
 }
+
+KERNEL_RELEVANT_PATTERN = re.compile(
+    r"(?:"
+    r"out of memory|oom(?:-killer)?|killed process|"
+    r"under.?voltage|voltage normal|throttl|thermal|overheat|"
+    r"kernel panic|panic|segfault|general protection fault|"
+    r"watchdog|hung task|blocked for more than|"
+    r"imx\d*|libcamera|unicam|camera|csi|i2c|remote i/o|"
+    r"mmc.*(?:error|fail|timeout)|ext4.*(?:error|warning)|"
+    r"read-only file system|usb.*(?:error|fail|timeout|reset)"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _log_definitions():
@@ -271,11 +286,22 @@ def get_journal(source):
         }
     try:
         result = _run(command, timeout=10)
+        content = result["output"]
+        if source == "kernel":
+            content = "\n".join(
+                line for line in content.splitlines()
+                if KERNEL_RELEVANT_PATTERN.search(line)
+            )
         response = {
             "source": source,
             "ok": result["ok"],
             "busy": False,
-            "content": result["output"] or "No journal entries.",
+            "content": content or (
+                "No relevant kernel problems found. Use Raw kernel warnings "
+                "to inspect all boot-time warnings."
+                if source == "kernel"
+                else "No journal entries."
+            ),
         }
         _journal_cache[source] = {"cached_at": time.monotonic(), "result": response}
         return response
