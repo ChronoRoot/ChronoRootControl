@@ -1,6 +1,9 @@
+from collections import deque
 import datetime
+import faulthandler
 import os
 import resource
+import signal
 import subprocess
 import sys
 import time
@@ -11,6 +14,11 @@ from config import Config
 from app.options.schedulerstatus import SchedulerStatus
 from phototron.rpimodule import RpiModule
 from phototron.camera import CameraFactory
+
+try:
+    import uwsgi
+except ImportError:
+    uwsgi = None
 
 try:
     from greenlet import getcurrent as get_ident
@@ -121,12 +129,16 @@ class CameraStream(object):
     _generation = 0
     _preview_operation_lock = threading.Lock()
     _state_lock = threading.Lock()
+    _frame_times = deque(maxlen=30)
     _state = {
         "status": "stopped",
         "camera_id": None,
         "last_error": None,
         "updated_at": None,
         "last_frame_at": None,
+        "fps_target": getattr(Config, "PREVIEW_FPS", 10),
+        "fps_actual": 0.0,
+        "frame_count": 0,
         "resources": {},
     }
 
@@ -142,6 +154,7 @@ class CameraStream(object):
                     CameraStream.reset = False
 
                 old_thread = CameraStream.thread
+                old_generation = CameraStream._generation
 
                 if old_thread is None:
                     CameraStream.cam_id = cam_id
@@ -167,12 +180,19 @@ class CameraStream(object):
                         "Timeout: Old stream thread appears deadlocked. "
                         "Force-closing camera to unblock it."
                     )
-                    CameraStream._force_close_active_camera()
+                    CameraStream._start_force_close_thread("camera handoff timeout")
 
-                    if not self._wait_for_thread_death(old_thread, timeout=10.0):
+                    close_grace = getattr(Config, "STREAM_CLOSE_GRACE_TIMEOUT", 5)
+                    if not self._wait_for_thread_death(old_thread, timeout=close_grace):
                         message = "Old stream thread refused to die; not starting camera %s." % cam_id
                         logger.error(message)
                         CameraStream._set_state("error", message, camera_id=cam_id, persist=True)
+                        CameraStream._escalate_stuck_worker(
+                            old_thread,
+                            old_generation,
+                            cam_id,
+                            "camera handoff remained stuck after force-close",
+                        )
                         return
 
                 with CameraStream._lifecycle_lock:
@@ -202,11 +222,15 @@ class CameraStream(object):
         cls._generation += 1
         stream_generation = cls._generation
         cls.last_access = time.time()
-        cls.last_frame_time = time.time()
+        cls.last_frame_time = time.monotonic()
         cls.frame = None
         cls.event = CameraEvent()
         with cls._state_lock:
             cls._state["last_frame_at"] = None
+            cls._state["fps_target"] = getattr(Config, "PREVIEW_FPS", 10)
+            cls._state["fps_actual"] = 0.0
+            cls._state["frame_count"] = 0
+            cls._frame_times.clear()
         resources = get_resource_snapshot()
         logger.info("Starting camera stream thread with cam %s. Resources: %s", stream_cam_id, resources)
         cls._set_state("starting", resources=resources, camera_id=stream_cam_id, persist=True)
@@ -219,7 +243,7 @@ class CameraStream(object):
 
         watchdog = threading.Thread(
             target=cls._watchdog,
-            args=(cls.thread, stream_cam_id),
+            args=(cls.thread, stream_cam_id, stream_generation),
             daemon=True,
         )
         watchdog.start()
@@ -227,9 +251,9 @@ class CameraStream(object):
 
     @staticmethod
     def _wait_for_thread_death(thread, timeout):
-        start_wait = time.time()
+        start_wait = time.monotonic()
         while thread.is_alive():
-            if time.time() - start_wait > timeout:
+            if time.monotonic() - start_wait > timeout:
                 return False
             time.sleep(0.1)
         return True
@@ -245,6 +269,115 @@ class CameraStream(object):
                 camera.close()
             except Exception:
                 logger.exception("[WATCHDOG] Error force-closing camera")
+
+    @classmethod
+    def _start_force_close_thread(cls, reason):
+        """Attempt Picamera2 close without allowing close() to block the watchdog."""
+        closer = threading.Thread(
+            target=cls._force_close_active_camera,
+            name="CameraForceClose",
+            daemon=True,
+        )
+        logger.error("[WATCHDOG] Starting bounded force-close: %s", reason)
+        closer.start()
+        return closer
+
+    @staticmethod
+    def _dump_thread_stacks(reason):
+        """Persist all Python thread stacks before hard worker recovery."""
+        try:
+            with open(Config.CRASH_LOG_FILE, "a") as handle:
+                handle.write(
+                    "\n[%s] STREAM WATCHDOG STACK DUMP: %s\n"
+                    % (datetime.datetime.now().strftime(Config.PRETTY_FORMAT), reason)
+                )
+                faulthandler.dump_traceback(file=handle, all_threads=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            logger.exception("[WATCHDOG] Failed to persist thread stack dump")
+
+    @staticmethod
+    def _flush_log_handlers():
+        for handler in logger.handlers:
+            try:
+                handler.flush()
+                stream = getattr(handler, "stream", None)
+                if stream is not None and hasattr(stream, "fileno"):
+                    os.fsync(stream.fileno())
+            except (OSError, ValueError):
+                pass
+
+    @staticmethod
+    def _is_uwsgi_worker():
+        if uwsgi is None or not hasattr(uwsgi, "worker_id"):
+            return False
+        try:
+            return int(uwsgi.worker_id()) > 0
+        except Exception:
+            return False
+
+    @classmethod
+    def _escalate_stuck_worker(cls, stream_thread, stream_generation, cam_id, reason):
+        """
+        Terminate only the current web worker when its live stream still owns
+        hardware after bounded close. The uWSGI master respawns the worker and
+        Linux releases its FileLock; the scheduler mule is a separate process.
+        """
+        if (
+            cls.thread is not stream_thread
+            or cls._generation != stream_generation
+            or not stream_thread.is_alive()
+        ):
+            logger.warning(
+                "[WATCHDOG] Hard recovery cancelled: stream generation %s is no longer current.",
+                stream_generation,
+            )
+            return False
+
+        message = (
+            "Camera %s stream generation %s remained stuck after close grace; "
+            "worker PID %s must be replaced. Reason: %s"
+            % (cam_id, stream_generation, os.getpid(), reason)
+        )
+        resources = get_resource_snapshot()
+        logger.critical("[WATCHDOG] %s Resources: %s", message, resources)
+        cls._set_state(
+            "worker_terminating",
+            message,
+            resources=resources,
+            camera_id=cam_id,
+            persist=True,
+        )
+        cls._dump_thread_stacks(message)
+        cls._flush_log_handlers()
+
+        # Re-check immediately before the irreversible action. An old watchdog
+        # must never terminate a healthy successor stream.
+        if (
+            cls.thread is not stream_thread
+            or cls._generation != stream_generation
+            or not stream_thread.is_alive()
+        ):
+            logger.warning("[WATCHDOG] Worker termination cancelled after final generation check.")
+            return False
+
+        if not cls._is_uwsgi_worker():
+            logger.critical(
+                "[WATCHDOG] Refusing automatic process termination outside a uWSGI worker; "
+                "manual service restart is required."
+            )
+            cls._flush_log_handlers()
+            return False
+
+        logger.critical(
+            "[WATCHDOG] Sending SIGKILL to stuck uWSGI worker PID %s. "
+            "The master should respawn it; the scheduler mule remains alive.",
+            os.getpid(),
+        )
+        cls._flush_log_handlers()
+        os.kill(os.getpid(), signal.SIGKILL)
+        return True
 
     @classmethod
     def _set_state(cls, status, error=None, resources=None, camera_id=None, persist=False):
@@ -265,12 +398,29 @@ class CameraStream(object):
                 logger.exception("Failed to persist stream status")
 
     @classmethod
+    def _record_frame(cls):
+        """Update worker-local freshness/FPS telemetry without disk writes."""
+        now = time.monotonic()
+        cls.last_frame_time = now
+        with cls._state_lock:
+            cls._frame_times.append(now)
+            cls._state["frame_count"] += 1
+            cls._state["last_frame_at"] = datetime.datetime.now().strftime(Config.PRETTY_FORMAT)
+            if len(cls._frame_times) >= 2:
+                elapsed = cls._frame_times[-1] - cls._frame_times[0]
+                if elapsed > 0:
+                    cls._state["fps_actual"] = round(
+                        (len(cls._frame_times) - 1) / elapsed,
+                        1,
+                    )
+
+    @classmethod
     def get_status(cls):
         with cls._state_lock:
             status = dict(cls._state)
         status["thread_alive"] = bool(cls.thread and cls.thread.is_alive())
         status["last_frame_age_seconds"] = (
-            round(time.time() - cls.last_frame_time, 1) if cls.last_frame_time else None
+            round(time.monotonic() - cls.last_frame_time, 1) if cls.last_frame_time else None
         )
         return status
 
@@ -289,7 +439,7 @@ class CameraStream(object):
             return True, operation()
 
     @classmethod
-    def _watchdog(cls, stream_thread, stream_cam_id=None):
+    def _watchdog(cls, stream_thread, stream_cam_id=None, stream_generation=None):
         """
         Monitors the stream thread. If it is alive but has not produced a frame
         for STREAM_STALL_TIMEOUT seconds (e.g. capture_array() hung after a light
@@ -298,10 +448,15 @@ class CameraStream(object):
         """
         if stream_cam_id is None:
             stream_cam_id = cls.cam_id
+        if stream_generation is None:
+            stream_generation = cls._generation
         stall_timeout = getattr(Config, 'STREAM_STALL_TIMEOUT', 15)
         while stream_thread.is_alive():
             time.sleep(2)
-            stalled_for = time.time() - cls.last_frame_time
+            if cls.thread is not stream_thread or cls._generation != stream_generation:
+                logger.debug("[WATCHDOG] Stream generation was superseded; watchdog stopping.")
+                return
+            stalled_for = time.monotonic() - cls.last_frame_time
             if stream_thread.is_alive() and stalled_for > stall_timeout:
                 message = "No frame for %.1fs; force-closing camera to release the lock." % stalled_for
                 logger.error("[WATCHDOG] %s", message)
@@ -312,9 +467,24 @@ class CameraStream(object):
                     camera_id=stream_cam_id,
                     persist=True,
                 )
-                cls._force_close_active_camera()
-                # Give the unwind time to complete before considering another close.
-                cls.last_frame_time = time.time()
+                cls._dump_thread_stacks(message)
+                cls._start_force_close_thread(message)
+
+                close_grace = getattr(Config, "STREAM_CLOSE_GRACE_TIMEOUT", 5)
+                if cls._wait_for_thread_death(stream_thread, timeout=close_grace):
+                    logger.info(
+                        "[WATCHDOG] Stream released hardware within %.1fs close grace.",
+                        close_grace,
+                    )
+                    break
+
+                cls._escalate_stuck_worker(
+                    stream_thread,
+                    stream_generation,
+                    stream_cam_id,
+                    "no frame and Picamera2 did not unwind within %.1fs" % close_grace,
+                )
+                return
         logger.debug("[WATCHDOG] Stream thread exited; watchdog stopping.")
 
     def get_frame(self):
@@ -349,23 +519,22 @@ class CameraStream(object):
         # Writing "REQUESTING" here would clobber the real owner's "LOCKED" entry
         # in the shared status file if acquisition then fails.
         lock = FileLock(Config.LOCK_FILE, timeout=1)
-        lock_acquired = False
         release_guard_acquired = False
 
         try:
             with lock.acquire(timeout=5):
-                lock_acquired = True
-                logger.info(f"[STREAM] Lock acquired. Starting hardware boot for Cam {cam_id}")
-                status_manager.update_lock_state(status="LOCKED", owner="User (Web Interface)", details=f"Live Preview: Cam {cam_id}")
-                cls._set_state("starting", camera_id=cam_id, persist=True)
-
-                rpi.selector.enable_cam(cam_id)
-                time.sleep(0.1)
-
-                camera = CameraFactory.createCamera(Config.CAMERA_TYPE)
-                cls.active_camera = camera 
-                
+                camera = None
                 try:
+                    logger.info(f"[STREAM] Lock acquired. Starting hardware boot for Cam {cam_id}")
+                    status_manager.update_lock_state(status="LOCKED", owner="User (Web Interface)", details=f"Live Preview: Cam {cam_id}")
+                    cls._set_state("starting", camera_id=cam_id, persist=True)
+
+                    rpi.selector.enable_cam(cam_id)
+                    time.sleep(0.1)
+
+                    camera = CameraFactory.createCamera(Config.CAMERA_TYPE)
+                    cls.active_camera = camera
+
                     timestamp_log = datetime.datetime.now().strftime(Config.PRETTY_FORMAT)
                     status_manager.update_hardware_status(cam_id=cam_id, cam_status={"health": "OK", "last_check": timestamp_log})
 
@@ -373,14 +542,24 @@ class CameraStream(object):
                         yield frame
                         
                 finally:
-                    # Block preview-side GPIO operations while the camera closes,
-                    # and retain the guard until after the outer FileLock exits.
-                    cls._preview_operation_lock.acquire()
-                    release_guard_acquired = True
+                    if camera is not None:
+                        # Block preview-side GPIO operations while the camera closes,
+                        # and retain the guard until after the outer FileLock exits.
+                        cls._preview_operation_lock.acquire()
+                        release_guard_acquired = True
+                        try:
+                            camera.close()
+                        finally:
+                            cls.active_camera = None
+
+                    # Clear shared ownership while the real FileLock is still held.
+                    # A successor cannot acquire the OS lock and have its LOCKED
+                    # status overwritten by this stream's late cleanup.
+                    logger.info("[STREAM] Finished. Clearing status before releasing lock.")
                     try:
-                        camera.close()
-                    finally:
-                        cls.active_camera = None
+                        status_manager.update_lock_state(status="FREE", owner=None, details=None)
+                    except Exception:
+                        logger.exception("[STREAM ERROR] Failed to release lock status")
 
         except Timeout:
             # We never owned the lock: leave the shared lock_info untouched so the
@@ -409,17 +588,8 @@ class CameraStream(object):
             raise
         
         finally:
-            try:
-                # Only the invocation that actually held the FileLock may declare it FREE.
-                if lock_acquired:
-                    logger.info(f"[STREAM] Finished. Releasing lock.")
-                    try:
-                        status_manager.update_lock_state(status="FREE", owner=None, details=None)
-                    except Exception:
-                        logger.exception("[STREAM ERROR] Failed to release lock status")
-            finally:
-                if release_guard_acquired:
-                    cls._preview_operation_lock.release()
+            if release_guard_acquired:
+                cls._preview_operation_lock.release()
 
     @classmethod
     def _thread(cls, stream_cam_id=None):
@@ -432,9 +602,8 @@ class CameraStream(object):
             
             for frame in frames_iterator:
                 CameraStream.frame = frame
-                CameraStream.last_frame_time = time.time()
+                CameraStream._record_frame()
                 with CameraStream._state_lock:
-                    CameraStream._state["last_frame_at"] = datetime.datetime.now().strftime(Config.PRETTY_FORMAT)
                     was_running = CameraStream._state["status"] == "running"
                 if not was_running:
                     CameraStream._set_state("running", camera_id=stream_cam_id, persist=True)

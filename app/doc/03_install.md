@@ -229,9 +229,76 @@ sudo cp /srv/ChronoRootControl/server/nginx.conf /etc/nginx/sites-available/chro
 sudo rm -f /etc/nginx/sites-enabled/default
 cd /etc/nginx/sites-enabled/
 sudo ln -s ../sites-available/chronorootcontrol.conf .
+sudo nginx -t
 sudo systemctl restart nginx
 
 ```
+
+### Deploying live-preview recovery changes
+
+After updating an existing installation, deploy the repository's nginx
+configuration and restart both web layers:
+
+```bash
+sudo cp /srv/ChronoRootControl/server/nginx.conf /etc/nginx/sites-available/chronorootcontrol.conf
+sudo nginx -t
+sudo systemctl restart nginx
+sudo systemctl restart uwsgi
+```
+
+The dedicated `^~ /preview/video_feed/` location is required to disable nginx
+buffering for MJPEG only. The rest of the site keeps the default location.
+The application also sends no-cache and `X-Accel-Buffering: no` response headers.
+
+If the uWSGI master does not replace the web worker after a hard preview
+recovery (the site stays unresponsive, or Focus cannot start a new stream):
+
+```bash
+sudo systemctl status uwsgi
+sudo journalctl -u uwsgi -n 80 --no-pager
+sudo systemctl restart uwsgi
+```
+
+Do not reboot first. Collect the SHDL, crash, uWSGI, and kernel journals from
+**Configuration -> Debug & Recovery** before a manual reboot if the camera is
+still unavailable after the worker restart. The scheduler mule is a separate
+uWSGI process and is not terminated by worker-only recovery.
+
+### User-run Raspberry Pi validation checklist
+
+Perform this validation on the deployed Raspberry Pi hardware:
+
+1. Open each Focus page for at least two minutes. Confirm the displayed target
+   is 10 FPS, actual FPS remains close to 10, newest-frame age stays low, and
+   motion is current rather than delayed.
+2. Reload the page and switch repeatedly between camera ports. Confirm the prior
+   preview closes, the next camera starts, and scheduled captures are not
+   blocked by a stale web lock.
+3. Reproduce the known no-frame hardware timeout using the site's established
+   safe procedure. Do not attach or remove camera ribbon cables while the Pi is
+   powered.
+4. From the first missed frame, confirm the Debug panel records `stalled` after
+   about `STREAM_STALL_TIMEOUT` (15 seconds by default). If Picamera2 unwinds
+   within `STREAM_CLOSE_GRACE_TIMEOUT` (5 seconds by default), confirm the lock
+   is released and no worker termination occurs.
+5. If Picamera2 remains blocked past the close grace, confirm only the uWSGI
+   web worker is replaced. The scheduler mule and experiment schedule must
+   remain active, and the Raspberry Pi must not reboot. The uWSGI journal
+   should show a worker exit and replacement.
+6. Confirm `/tmp/cam.lock` is available after recovery:
+
+   ```bash
+   flock -n /tmp/cam.lock true && echo "camera lock is free" || echo "camera lock is held"
+   ```
+
+7. Run a normal scheduled or diagnostic capture after recovery. Confirm it can
+   select the multiplexer, open Picamera2, capture, and release the lock.
+8. In **Configuration -> Debug & Recovery**, inspect the SHDL and crash logs.
+   Confirm they contain the no-frame duration, camera ID, worker PID,
+   generation, resource snapshot, and all-thread stack dump before termination.
+9. Repeat the sustained-preview and forced-stall checks on both Raspberry Pi 3B
+   and 3B+ units, recording actual FPS, frame age, recovery time, worker
+   replacement, lock release, and whether the scheduler missed any capture.
 
 ## 8. Optional: I2C OLED Status Display
 

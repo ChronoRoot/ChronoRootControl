@@ -40,9 +40,13 @@
             <div class="card shadow-sm bg-dark p-1">
                 <img id="camera-preview" src="{{ url_for('focus_page.video_feed', cam_id=cam_id) }}" class="img-fluid rounded" style="width: 100%; min-height: 480px; object-fit: cover; background-color: #111;" alt="Live camera feed"/>
             </div>
+            <div id="stream-telemetry" class="small text-muted mt-2" aria-live="polite">
+                Preview starting&hellip;
+            </div>
             <div id="stream-status-alert" class="alert alert-danger mt-3 mb-0" style="display: none;" role="alert">
                 <strong><i class="fas fa-exclamation-triangle mr-1"></i> Preview problem:</strong>
                 <span id="stream-status-message">The camera stream stopped.</span>
+                <a href="{{ request.url }}" class="alert-link ml-1">Retry preview</a>
                 <a href="{{ url_for('config_page.conf') }}#debug-section" class="alert-link ml-1">Open Debug</a>
             </div>
         {% endif %}
@@ -273,10 +277,11 @@
     const preview = document.getElementById('camera-preview');
     const alertBox = document.getElementById('stream-status-alert');
     const messageBox = document.getElementById('stream-status-message');
-    if (!preview || !alertBox || !messageBox) return;
+    const telemetryBox = document.getElementById('stream-telemetry');
+    if (!preview || !alertBox || !messageBox || !telemetryBox) return;
 
     const statusUrl = "{{ url_for('focus_page.stream_status', cam_id=cam_id) }}";
-    const failureStates = ['busy', 'stalled', 'error'];
+    const failureStates = ['busy', 'stalled', 'error', 'worker_terminating'];
 
     function showStreamError(message) {
         messageBox.textContent = message || 'The camera stream stopped unexpectedly.';
@@ -291,6 +296,15 @@
         fetch(statusUrl, {cache: 'no-store'})
             .then(response => response.json())
             .then(status => {
+                const target = Number(status.fps_target || 0);
+                const actual = Number(status.fps_actual || 0);
+                const age = status.last_frame_age_seconds;
+                const ageText = (age === null || age === undefined)
+                    ? 'waiting'
+                    : Number(age).toFixed(1) + 's ago';
+                telemetryBox.textContent =
+                    `Target ${target.toFixed(0)} FPS | Actual ${actual.toFixed(1)} FPS | Last frame ${ageText}`;
+
                 if (failureStates.includes(status.status)) {
                     showStreamError(status.last_error);
                 } else if (status.status === 'running') {

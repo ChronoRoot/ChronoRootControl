@@ -127,18 +127,36 @@ class RaspiCamera(Camera):
                 s = min(stream_size)
                 stream_size = (s, s)
 
+            preview_fps = max(1, int(getattr(Config, "PREVIEW_FPS", 10)))
+            frame_duration_us = int(1000000 / preview_fps)
             config = self.picam2.create_preview_configuration(
-                main={"format": "RGB888", "size": stream_size}
+                main={"format": "RGB888", "size": stream_size},
+                # Do not hand capture_array() a previously completed request:
+                # every delivered image must come from a fresh camera frame.
+                queue=False,
+                controls={
+                    "FrameDurationLimits": (frame_duration_us, frame_duration_us),
+                },
             )
             config["sensor"]["output_size"] = out_size
             
             self.picam2.configure(config)
             self.picam2.start()
+            self.hw_logger.info(
+                "Stream: fixed preview rate %s FPS (%sus frame duration), queue disabled.",
+                preview_fps,
+                frame_duration_us,
+            )
 
             # Apply the active capture profile so the preview matches the final
             # picture (exposure / AWB / denoise) and respect its grayscale flag.
             preview_profile = self._apply_capture_profile({})
             preview_gray = preview_profile.get("grayscale", True)
+            # Capture profiles must not replace the camera-paced preview rate.
+            # ExposureTime 40 ms still fits inside a 100 ms (10 FPS) frame.
+            self.picam2.set_controls({
+                "FrameDurationLimits": (frame_duration_us, frame_duration_us),
+            })
             
             if profile.get("autofocus"):
                 # 1. Setup Tracking Variables for Live Tuning & Auto-Focus

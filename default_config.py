@@ -104,6 +104,12 @@ class Config(object):
     # Live preview stall watchdog: if the stream thread produces no frame for this
     # many seconds, the camera is force-closed so the hardware lock is released.
     STREAM_STALL_TIMEOUT = 15
+    # Camera-paced preview. 10 FPS is enough for focusing while reducing CSI,
+    # ISP, CPU, memory and network pressure on Raspberry Pi 3-class hardware.
+    PREVIEW_FPS = 10
+    # Time allowed for Picamera2 to unwind after a stall before only the stuck
+    # uWSGI web worker is terminated. The scheduler mule remains alive.
+    STREAM_CLOSE_GRACE_TIMEOUT = 5
     # Minutes a "User (Web Interface)" live-preview lock may be held before the
     # dashboard flags it as stuck (humans may legitimately focus for a while).
     USER_LOCK_ALLOWANCE = 30

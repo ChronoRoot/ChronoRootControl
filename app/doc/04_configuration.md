@@ -55,6 +55,14 @@ Noteworthy configuration variables are
 
 * `SELECTOR_PRESENT` that defines if a camera multiplexer is present on the module to be able to control several cameras.
 
+* `PREVIEW_FPS` sets the live Focus preview rate. The default is 10 FPS. Picamera2
+  is camera-paced at this rate and its completed-request queue is disabled, so the
+  preview waits for a new sensor frame instead of replaying an older queued frame.
+
+* `STREAM_STALL_TIMEOUT` is the no-frame interval before preview recovery starts
+  (15 seconds by default). `STREAM_CLOSE_GRACE_TIMEOUT` is the additional time
+  allowed for Picamera2 to close (5 seconds by default).
+
 ## Camera capture profiles
 
 Since the migration to Picamera2 (libcamera), camera tuning is driven by named profiles in `CAM_CAPTURE_PROFILES`, not by the legacy `CAM_PARAMS` ISP keys. Each profile bundles a set of libcamera controls that are applied via `set_controls()` right before each capture, plus a `grayscale` flag controlling whether the saved PNG is converted to monochrome.
@@ -88,3 +96,13 @@ The panel reads only these configured files and the watchdog reboot record; it i
 Application logs cannot record a process that is killed by the kernel. The service and journal views therefore include uWSGI, nginx, the multiplexer boot fix, and kernel warnings. The default kernel view filters routine Raspberry Pi boot noise and keeps OOM kills, camera/I2C failures, filesystem faults, hangs, thermal events, and power/undervoltage warnings. **Raw kernel warnings** remains available when the complete boot journal is needed.
 
 Log cleanup is manual. **Clear log** truncates the selected application log in place after confirmation, preserving the file used by active logger processes. The watchdog reboot record cannot be cleared from the interface because it enforces the automatic-reboot circuit breaker.
+
+The Focus overlay reports **target FPS** (the configured camera rate), **actual
+FPS** (a rolling in-memory measurement of delivered frames), and **last-frame
+age**. Those metrics stay in the web worker; they are not written to disk every
+frame. If no frame arrives for the configured stall timeout, the crash log
+receives all Python thread stacks and a bounded Picamera2 close begins. If the
+close grace also expires, only the stuck uWSGI web worker is terminated; the
+uWSGI master replaces it and Linux releases that worker's `/tmp/cam.lock`. The
+scheduler mule is not terminated, and the Pi is not rebooted. If the worker does
+not come back, restart uWSGI after collecting journals from this panel.

@@ -121,8 +121,14 @@ def gen(camera):
 def video_feed(cam_id):
     logger.info(f"User requested live preview for camera {cam_id}")
     cam_obj = CameraStream(cam_id=cam_id)
-    return Response(gen(cam_obj),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    response = Response(
+        gen(cam_obj),
+        mimetype='multipart/x-mixed-replace; boundary=frame',
+    )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Accel-Buffering"] = "no"
+    return response
 
 @focus_page.route('/api/stream_status/<int:cam_id>', methods=['GET'])
 def stream_status(cam_id):
@@ -132,7 +138,10 @@ def stream_status(cam_id):
 
     # After a worker restart, local state is empty but shared state can explain
     # why the previous stream disappeared.
-    if local_status.get("status") == "stopped" and shared_status.get("status") == "error":
+    if (
+        local_status.get("status") == "stopped"
+        and shared_status.get("status") in ("stalled", "error", "worker_terminating")
+    ):
         local_status["last_error"] = shared_status.get("last_error")
         local_status["updated_at"] = shared_status.get("updated_at")
 
