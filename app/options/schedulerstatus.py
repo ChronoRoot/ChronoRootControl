@@ -11,6 +11,7 @@ import uuid
 from config import Config
 import fcntl
 import time
+from filelock import FileLock, Timeout
 from app.storage.stats import get_storage_stats
 
 class SchedulerStatus(object):
@@ -55,6 +56,12 @@ class SchedulerStatus(object):
                 "owner": None, 
                 "details": None,
                 "acquired_at": None  
+            },
+            "stream": {
+                "status": "stopped",
+                "camera_id": None,
+                "last_error": None,
+                "updated_at": None
             },
             "cams": {},
             "lights": {
@@ -326,6 +333,123 @@ class SchedulerStatus(object):
                 self.state["hardware"]["cams"][cam_id]["activity"] = "IDLE"
              
         self.write()
+
+    def update_stream_status(self, status, camera_id=None, last_error=None):
+        """Persist low-frequency live-preview lifecycle transitions."""
+        stream_state = {
+            "status": status,
+            "camera_id": camera_id,
+            "last_error": last_error,
+            "updated_at": datetime.now().strftime(Config.PRETTY_FORMAT),
+        }
+        for _attempt in range(10):
+            try:
+                with open(self.status_file, "a+") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    try:
+                        handle.seek(0)
+                        raw = handle.read()
+                        if not raw.strip():
+                            latest = json.loads(json.dumps(self.default_state))
+                        else:
+                            try:
+                                latest = json.loads(raw)
+                            except json.JSONDecodeError:
+                                if self.log:
+                                    self.log.error("Refusing to overwrite corrupted status while updating stream.")
+                                return
+                        latest.setdefault("hardware", {})["stream"] = stream_state
+                        handle.seek(0)
+                        handle.truncate()
+                        json.dump(latest, handle, indent=2)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                        self.state = latest
+                        return
+                    finally:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+            except (BlockingIOError, IOError):
+                time.sleep(0.05)
+        if self.log:
+            self.log.error("Could not persist stream status after maximum retries.")
+
+    def _repair_stale_lock_atomically(self):
+        """Mutate lock/stream fields while one exclusive status-file lock is held."""
+        for _attempt in range(10):
+            try:
+                with open(self.status_file, "a+") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    try:
+                        handle.seek(0)
+                        try:
+                            latest = json.load(handle)
+                        except json.JSONDecodeError:
+                            # Never replace a corrupted/incomplete status snapshot
+                            # with defaults during recovery.
+                            return None
+
+                        hardware = latest.get("hardware", {})
+                        current = hardware.get("lock_info", {})
+                        if current.get("status") != "LOCKED":
+                            self.state = latest
+                            return None
+
+                        stale_owner = current.get("owner") or "unknown process"
+                        hardware["lock_info"] = {
+                            "status": "FREE",
+                            "owner": None,
+                            "details": None,
+                            "acquired_at": None,
+                        }
+                        for cam in hardware.get("cams", {}).values():
+                            cam["activity"] = "IDLE"
+                        hardware["stream"] = {
+                            "status": "error",
+                            "camera_id": hardware.get("stream", {}).get("camera_id"),
+                            "last_error": "Recovered stale lock after its owning process exited.",
+                            "updated_at": datetime.now().strftime(Config.PRETTY_FORMAT),
+                        }
+
+                        handle.seek(0)
+                        handle.truncate()
+                        json.dump(latest, handle, indent=2)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                        self.state = latest
+                        return stale_owner
+                    finally:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+            except (BlockingIOError, IOError):
+                time.sleep(0.05)
+        return None
+
+    def reconcile_hardware_lock(self):
+        """
+        Repair stale RAM lock telemetry after a worker/native crash.
+
+        A FileLock is released by the OS when its process dies. Therefore, if
+        status says LOCKED while this probe can acquire the real lock, no
+        hardware owner remains and it is safe to mark the shared state FREE.
+        """
+        self.load()
+        lock_info = self.state.get("hardware", {}).get("lock_info", {})
+        if lock_info.get("status") != "LOCKED":
+            return False
+
+        probe = FileLock(Config.LOCK_FILE)
+        try:
+            with probe.acquire(timeout=0):
+                stale_owner = self._repair_stale_lock_atomically()
+                if stale_owner is None:
+                    return False
+                if self.log:
+                    self.log.warning(
+                        "Recovered stale hardware status owned by %s; OS lock was free.",
+                        stale_owner,
+                    )
+                return True
+        except Timeout:
+            return False
 
     def refresh_scheduler_status(self):
         """
@@ -685,6 +809,7 @@ class SchedulerStatus(object):
             
             # Hardware & Diagnostics
             "lock_info": lock_info,
+            "stream_status": data["hardware"].get("stream", {}),
             "cam_reports": data["hardware"]["cams"],
             "lights_info": data["hardware"].get("lights", {}),  
             "last_diagnostic": data["hardware"].get("last_diagnostic", {}),

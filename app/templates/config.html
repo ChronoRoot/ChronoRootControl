@@ -624,6 +624,89 @@
     </div>
 </div>
 
+<!-- Debug & Recovery -->
+<div id="debug-section" class="mb-5">
+    <h3 class="border-bottom pb-2 mb-4 text-secondary">
+        <i class="fas fa-bug mr-2"></i>4. Debug &amp; Recovery
+    </h3>
+    <div class="card shadow-sm border-secondary">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="fas fa-terminal mr-2"></i>Logs and Service Health</h5>
+            <button type="button" id="debug-refresh-btn" class="btn btn-sm btn-light" onclick="refreshDebugStatus()">
+                <i class="fas fa-sync-alt mr-1"></i> Load / Refresh
+            </button>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small">
+                Application logs explain Python and camera errors. Service and kernel journals are also shown because
+                OOM kills, native camera crashes, and undervoltage events cannot be caught by Python.
+            </p>
+
+            <div id="debug-system-summary" class="alert alert-light border small">
+                Click <strong>Load / Refresh</strong> to collect diagnostics.
+            </div>
+
+            <h6 class="font-weight-bold mt-4">Services</h6>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered mb-2">
+                    <thead class="thead-light">
+                        <tr>
+                            <th>Unit</th>
+                            <th>State</th>
+                            <th>Restarts</th>
+                            <th>Exit</th>
+                        </tr>
+                    </thead>
+                    <tbody id="debug-services-body">
+                        <tr><td colspan="4" class="text-muted text-center">Not loaded</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <pre id="debug-failed-units" class="bg-light border rounded p-2 small" style="max-height: 120px; overflow: auto;">Failed units not loaded.</pre>
+
+            <div class="row mt-4">
+                <div class="col-lg-6 mb-3">
+                    <label for="debug-log-select" class="font-weight-bold">File logs</label>
+                    <select id="debug-log-select" class="form-control form-control-sm" onchange="selectDebugLog()">
+                        <option value="">Load diagnostics first</option>
+                    </select>
+                    <div id="debug-log-meta" class="small text-muted mt-2">No log selected.</div>
+                    <div class="btn-group mt-2">
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="loadDebugLog()" id="debug-view-log-btn" disabled>
+                            <i class="fas fa-file-alt mr-1"></i> View tail
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearDebugLog()" id="debug-clear-log-btn" disabled>
+                            <i class="fas fa-eraser mr-1"></i> Clear log
+                        </button>
+                    </div>
+                </div>
+                <div class="col-lg-6 mb-3">
+                    <label for="debug-journal-select" class="font-weight-bold">System journals</label>
+                    <select id="debug-journal-select" class="form-control form-control-sm">
+                        <option value="uwsgi">uWSGI service</option>
+                        <option value="nginx">Nginx service</option>
+                        <option value="mux_fix">Multiplexer boot fix</option>
+                        <option value="kernel">Kernel warnings (OOM, camera, power)</option>
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="loadDebugJournal()">
+                        <i class="fas fa-book-medical mr-1"></i> View journal
+                    </button>
+                </div>
+            </div>
+
+            <form id="debug-clear-form" class="d-none">
+                {{ debug_clear_form.csrf_token(id="debug-csrf-token") }}
+            </form>
+
+            <div class="d-flex justify-content-between align-items-center mt-2">
+                <strong id="debug-output-title">Diagnostic output</strong>
+                <span class="badge badge-secondary">Newest entries at bottom</span>
+            </div>
+            <pre id="debug-output" class="bg-dark text-light rounded p-3 mt-2 small" style="min-height: 220px; max-height: 520px; overflow: auto; white-space: pre-wrap;">Select a log or journal.</pre>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block footer %}
@@ -1190,6 +1273,168 @@
         resultsDiv.slideDown(400, function() {
             resultsDiv[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
+    }
+
+    const DEBUG_STATUS_URL = "{{ url_for('config_page.debug_status') }}";
+    const DEBUG_LOG_URL = "{{ url_for('config_page.debug_log', log_id='__LOG__') }}";
+    const DEBUG_CLEAR_URL = "{{ url_for('config_page.debug_clear_log', log_id='__LOG__') }}";
+    const DEBUG_JOURNAL_URL = "{{ url_for('config_page.debug_journal', source='__SOURCE__') }}";
+    let debugLogs = [];
+
+    function formatDebugBytes(bytes) {
+        const value = Number(bytes || 0);
+        if (value < 1024) return value + ' B';
+        if (value < 1024 * 1024) return (value / 1024).toFixed(1) + ' KB';
+        return (value / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function setDebugOutput(title, content) {
+        document.getElementById('debug-output-title').textContent = title;
+        const output = document.getElementById('debug-output');
+        output.textContent = content || 'No output.';
+        output.scrollTop = output.scrollHeight;
+    }
+
+    async function refreshDebugStatus() {
+        const button = document.getElementById('debug-refresh-btn');
+        const original = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Loading...';
+        try {
+            const response = await fetch(DEBUG_STATUS_URL, {cache: 'no-store'});
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+            const system = data.system || {};
+            const memory = system.mem_available_kb == null
+                ? 'unknown'
+                : formatDebugBytes(system.mem_available_kb * 1024);
+            const temperature = system.temperature_c == null ? 'unknown' : `${system.temperature_c} °C`;
+            const throttled = system.throttled || 'unavailable';
+            document.getElementById('debug-system-summary').textContent =
+                `Model: ${system.board_model || 'unknown'} | Available memory: ${memory} | ` +
+                `Temperature: ${temperature} | Power/throttle flags: ${throttled}`;
+
+            const body = document.getElementById('debug-services-body');
+            body.innerHTML = '';
+            (data.services || []).forEach(service => {
+                const row = document.createElement('tr');
+                const badge = service.active_state === 'active' ? 'badge-success'
+                    : (service.available ? 'badge-danger' : 'badge-secondary');
+                const values = [
+                    service.unit,
+                    service.available ? `${service.active_state} / ${service.sub_state}` : 'not installed',
+                    service.restarts,
+                    service.exit_status
+                ];
+                values.forEach((value, index) => {
+                    const cell = document.createElement('td');
+                    if (index === 1) {
+                        const state = document.createElement('span');
+                        state.className = `badge ${badge}`;
+                        state.textContent = value;
+                        cell.appendChild(state);
+                    } else {
+                        cell.textContent = value == null ? '-' : value;
+                    }
+                    row.appendChild(cell);
+                });
+                body.appendChild(row);
+            });
+            if (!body.children.length) {
+                body.innerHTML = '<tr><td colspan="4" class="text-muted text-center">No service information available.</td></tr>';
+            }
+
+            document.getElementById('debug-failed-units').textContent =
+                ((data.failed_units || {}).content) || 'No failed units.';
+
+            debugLogs = data.logs || [];
+            const select = document.getElementById('debug-log-select');
+            const previous = select.value;
+            select.innerHTML = '';
+            debugLogs.forEach(log => {
+                const option = document.createElement('option');
+                option.value = log.id;
+                option.textContent = `${log.label} (${formatDebugBytes(log.size_bytes)})`;
+                select.appendChild(option);
+            });
+            if (debugLogs.some(log => log.id === previous)) select.value = previous;
+            selectDebugLog();
+        } catch (error) {
+            setDebugOutput('Debug load failed', error.message);
+            showToast(`Could not load diagnostics: ${error.message}`, 'danger');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = original;
+        }
+    }
+
+    function selectDebugLog() {
+        const logId = document.getElementById('debug-log-select').value;
+        const log = debugLogs.find(item => item.id === logId);
+        document.getElementById('debug-view-log-btn').disabled = !log;
+        document.getElementById('debug-clear-log-btn').disabled = !log || !log.clearable;
+        document.getElementById('debug-log-meta').textContent = log
+            ? `${log.path} | ${formatDebugBytes(log.size_bytes)} | Modified: ${log.modified_at || 'never'}`
+            : 'No log selected.';
+    }
+
+    async function loadDebugLog() {
+        const logId = document.getElementById('debug-log-select').value;
+        if (!logId) return;
+        setDebugOutput('Loading log...', '');
+        try {
+            const response = await fetch(DEBUG_LOG_URL.replace('__LOG__', encodeURIComponent(logId)), {cache: 'no-store'});
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            const suffix = data.truncated ? '\n\n[Only the newest bounded portion is shown.]' : '';
+            setDebugOutput(`${logId} log`, (data.message || data.content || 'Log is empty.') + suffix);
+        } catch (error) {
+            setDebugOutput('Log read failed', error.message);
+        }
+    }
+
+    async function clearDebugLog() {
+        const logId = document.getElementById('debug-log-select').value;
+        const log = debugLogs.find(item => item.id === logId);
+        if (!log || !log.clearable) return;
+        const confirmed = await asyncConfirm(
+            'Clear Log',
+            `Permanently remove the current contents of '${log.label}'?\n\nThe file will remain available for new entries.`,
+            true
+        );
+        if (!confirmed) return;
+
+        try {
+            const formData = new FormData(document.getElementById('debug-clear-form'));
+            const response = await fetch(
+                DEBUG_CLEAR_URL.replace('__LOG__', encodeURIComponent(logId)),
+                {method: 'POST', body: formData}
+            );
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            showToast(data.message, 'success');
+            await refreshDebugStatus();
+            await loadDebugLog();
+        } catch (error) {
+            showToast(`Could not clear log: ${error.message}`, 'danger');
+        }
+    }
+
+    async function loadDebugJournal() {
+        const source = document.getElementById('debug-journal-select').value;
+        setDebugOutput('Loading journal...', '');
+        try {
+            const response = await fetch(
+                DEBUG_JOURNAL_URL.replace('__SOURCE__', encodeURIComponent(source)),
+                {cache: 'no-store'}
+            );
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            setDebugOutput(`${source} journal`, data.content);
+        } catch (error) {
+            setDebugOutput('Journal read failed', error.message);
+        }
     }
 </script>
 {% endblock %}

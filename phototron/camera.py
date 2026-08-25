@@ -85,9 +85,9 @@ class RaspiCamera(Camera):
                 self.picam2.stop()
                 self.picam2.close()
             except Exception:
-                pass
-            del self.picam2 
-            self.picam2 = None
+                self.hw_logger.warning("Camera close failed", exc_info=True)
+            finally:
+                self.picam2 = None
 
     def camera_check(self):
         try:
@@ -224,8 +224,7 @@ class RaspiCamera(Camera):
                                 })
                                 last_live_focus = current_live_focus
                         except Exception:
-                            self.hw_logger.debug("Stream: error reading manual focus file")
-                            pass
+                            self.hw_logger.debug("Stream: error reading manual focus file", exc_info=True)
                     
                 img_array = self.picam2.capture_array()
                 pil_img = Image.fromarray(img_array)
@@ -237,8 +236,11 @@ class RaspiCamera(Camera):
                 yield stream.getvalue()
                 stream.close()
 
-        except Exception as e:
-            self.hw_logger.error(f"Stream crash: {e}")
+        except Exception:
+            # The stream owner must see terminal failures so it can update shared
+            # health/lock state instead of treating generator exhaustion as EOF.
+            self.hw_logger.exception("Stream crash")
+            raise
         finally:
             self.close()
 

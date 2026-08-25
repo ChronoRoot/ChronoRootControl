@@ -5,7 +5,19 @@
 from datetime import datetime
 from flask import Blueprint, flash, jsonify, render_template, request, url_for, redirect
 
-from .form import AppSettingsForm, HardwareSettingsForm, CameraProfileForm, HostnameForm
+from .form import (
+    AppSettingsForm,
+    HardwareSettingsForm,
+    CameraProfileForm,
+    HostnameForm,
+    DebugClearForm,
+)
+from .debug_manager import (
+    clear_log,
+    get_debug_snapshot,
+    get_journal,
+    tail_log,
+)
 from config import Config
 
 from phototron.rpimodule import RpiModule
@@ -18,6 +30,46 @@ from app.options.config_manager import (apply_system_time_config, save_user_conf
 config_page = Blueprint('config_page', __name__,
                         template_folder='templates',
                         static_folder='static')
+
+@config_page.route('/debug/status', methods=['GET'])
+def debug_status():
+    """Return bounded system and file metadata for the Debug panel."""
+    snapshot = get_debug_snapshot()
+    return jsonify(snapshot), (503 if snapshot.get("busy") else 200)
+
+
+@config_page.route('/debug/log/<log_id>', methods=['GET'])
+def debug_log(log_id):
+    try:
+        return jsonify(tail_log(log_id, request.args.get("bytes")))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except OSError as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@config_page.route('/debug/journal/<source>', methods=['GET'])
+def debug_journal(source):
+    try:
+        return jsonify(get_journal(source))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+
+
+@config_page.route('/debug/log/<log_id>/clear', methods=['POST'])
+def debug_clear_log(log_id):
+    form = DebugClearForm(prefix="debug")
+    if not form.validate_on_submit():
+        return jsonify({"error": "The request expired or failed CSRF validation. Refresh and try again."}), 400
+    try:
+        return jsonify({"result": True, "message": clear_log(log_id)})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except OSError as exc:
+        return jsonify({"error": str(exc)}), 500
+
 
 @config_page.route('/', methods=['GET', 'POST'])
 def conf():
@@ -35,6 +87,7 @@ def conf():
     hw_form = HardwareSettingsForm(prefix="hw")
     camera_form = CameraProfileForm(prefix="cam")
     hostname_form = HostnameForm(prefix="host")
+    debug_clear_form = DebugClearForm(prefix="debug")
 
     # 2. Pre-fill forms on GET
     if request.method == 'GET':
@@ -246,6 +299,7 @@ def conf():
             hw_form=hw_form, 
             camera_form=camera_form,
             hostname_form=hostname_form,
+            debug_clear_form=debug_clear_form,
             light_state=light.state, config=Config, 
             scheduler_info=scheduler_info,
             has_autofocus=has_autofocus)

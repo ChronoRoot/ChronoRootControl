@@ -280,6 +280,10 @@ class HardwareWatchdog(threading.Thread):
         while True:
             try:                
                 scheduler_status.update_identity()
+                # A crashed uWSGI worker releases the kernel FileLock but cannot
+                # clear the shared JSON. Repair that stale metadata before alert
+                # calculation so it can never escalate into an unnecessary reboot.
+                scheduler_status.reconcile_hardware_lock()
                 sys_info = scheduler_status.get_info()
                 alerts = sys_info.get("alerts", {})
                 all_cam_fail = sys_info.get("all_cameras_failed")
@@ -300,7 +304,15 @@ class HardwareWatchdog(threading.Thread):
                     time.sleep(60)
                     continue
 
-                self.logger.critical(f"WATCHDOG: Reboot trigger — {reason}. Initiating recovery protocol.")
+                self.logger.critical(
+                    "WATCHDOG: Reboot trigger — %s. Context: lock=%s stream=%s "
+                    "storage=%s watchdog=%s",
+                    reason,
+                    sys_info.get("lock_info"),
+                    sys_info.get("stream_status"),
+                    sys_info.get("system_health", {}).get("storage"),
+                    sys_info.get("watchdog"),
+                )
                 self.handle_stuck_hardware(expid, reason)
                 time.sleep(60)
                         

@@ -80,14 +80,21 @@ class Config(object):
     MULE_NO = 1
 
     APP_ROOT = os.path.dirname(os.path.realpath(__file__))
+    LOG_DIR = os.path.join(APP_ROOT, 'log')
     LOGFILE = os.path.join(
-                    APP_ROOT,
-                    'log/%s.log' % SITE_NAME.replace(' ', '_')
+                    LOG_DIR,
+                    '%s.log' % SITE_NAME.replace(' ', '_')
                     )
 
     SHDL_LOG_FILE = os.path.join(
-                        APP_ROOT,
-                        'log/%s_SHDL.log' % SITE_NAME.replace(' ', '_')
+                        LOG_DIR,
+                        '%s_SHDL.log' % SITE_NAME.replace(' ', '_')
+                    )
+    # Fatal Python/native signals that faulthandler can observe are written
+    # separately. OOM/SIGKILL events remain available through the system journal.
+    CRASH_LOG_FILE = os.path.join(
+                        LOG_DIR,
+                        '%s_CRASH.log' % SITE_NAME.replace(' ', '_')
                     )
     LOG_FORMAT = '[%(asctime)s] [%(levelname)s] [pid/%(process)d] %(message)s'
     LOG_LEVEL = logging.DEBUG

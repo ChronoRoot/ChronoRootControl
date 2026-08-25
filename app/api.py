@@ -16,6 +16,7 @@ from flask import Blueprint, abort, jsonify, make_response, request, send_from_d
 import uwsgi 
 import json
 import socket
+from filelock import FileLock, Timeout
 
 # Local Application Imports
 from config import Config
@@ -25,6 +26,7 @@ from app.options.schedulerstatus import SchedulerStatus
 from app.options.config_manager import save_user_config, apply_system_time_config, run_git_update
 from app.sync.manager import setup_rclone_remote, test_rclone_connection
 from phototron.rpimodule import RpiModule
+from phototron.streamer import CameraStream
 
 # Blueprint Definition
 api_exp = Blueprint('api_exp', __name__, template_folder='templates', static_folder='static')
@@ -656,22 +658,51 @@ def toggle_light():
     rpi = RpiModule()
     light = rpi.light
     status_mgr = SchedulerStatus()
+
+    lock_info = status_mgr.state.get("hardware", {}).get("lock_info", {})
+    lock_status = lock_info.get("status")
+    lock_owner = lock_info.get("owner") or "Unknown Process"
+    if lock_status in ("LOCKED", "REQUESTING") and lock_owner != "User (Web Interface)":
+        return jsonify({
+            "success": False,
+            "error": f"Hardware busy: {lock_owner} is using the cameras. Try again shortly.",
+        }), 409
     
     # Get the requested state from the JSON payload
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     turn_on = data.get('ir_state', False)
-    
-    try:
+
+    def apply_light_state():
         if turn_on:
             light.state = light.ON
             status_mgr.update_lights_state("ON")
-            new_state = True
-        else:
-            light.state = light.OFF
-            status_mgr.update_lights_state("OFF")
-            new_state = False
+            return True
+        light.state = light.OFF
+        status_mgr.update_lights_state("OFF")
+        return False
+    
+    try:
+        preview_applied = False
+        if (
+            lock_status == "LOCKED"
+            and lock_owner == "User (Web Interface)"
+        ):
+            # The preview intentionally owns the real lock while users tune light.
+            preview_applied, new_state = CameraStream.run_with_preview_hardware(
+                apply_light_state
+            )
+        if not preview_applied:
+            # Status can change after the check above. The actual FileLock closes
+            # that race before driving GPIO during a scheduled capture.
+            with FileLock(Config.LOCK_FILE).acquire(timeout=0):
+                new_state = apply_light_state()
             
         return jsonify({"success": True, "light_state": new_state})
+    except Timeout:
+        return jsonify({
+            "success": False,
+            "error": "Hardware became busy before the light could be changed.",
+        }), 409
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

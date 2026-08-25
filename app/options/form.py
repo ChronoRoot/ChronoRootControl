@@ -96,3 +96,8 @@ class HostnameForm(Form):
         Regexp(r'^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$',
                message="Only letters, digits and hyphens; cannot start or end with a hyphen.")
     ])
+
+
+class DebugClearForm(Form):
+    """CSRF-only form for destructive log truncation."""
+    pass

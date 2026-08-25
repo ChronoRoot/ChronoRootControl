@@ -72,3 +72,19 @@ The active profile applies to every capture (experiments, diagnostics, and the p
 The easiest way to switch the active profile or tune the manual backlight (`ExposureTime`, `AnalogueGain`, denoise) is the **Camera Capture Profile** card under Settings -> Advanced Hardware Configuration. Saving there writes to `user_config.py` and restarts the services so the change takes effect on the next capture.
 
 `CROP_TO_SQUARE` (toggled via the "Crop images to square" switch in the **Hardware Topology** card) makes both captures and the live preview request a square resolution (`side x side`, with `side` the smaller of the sensor's width/height, e.g. 2464x2464). libcamera then outputs a centered square crop, removing the backlight visible at the sides of square plates.
+
+## Debug and recovery
+
+The bottom of the Configuration page contains a **Debug & Recovery** panel. Diagnostics are loaded only when **Load / Refresh** is pressed.
+
+The standard installation writes application logs to `/srv/ChronoRootControl/log/` (singular):
+
+* `ChronoRootControl.log` contains Flask and experiment workflow messages.
+* `ChronoRootControl_SHDL.log` contains camera, multiplexer, scheduler, and live-stream details.
+* `ChronoRootControl_CRASH.log` receives Python fatal-signal tracebacks when the process can still write them.
+
+The panel reads only these configured files and the watchdog reboot record; it is not a general filesystem browser. Log output is bounded to the newest portion so opening a large file does not exhaust Raspberry Pi memory.
+
+Application logs cannot record a process that is killed by the kernel. The service and journal views therefore include uWSGI, nginx, the multiplexer boot fix, and kernel warnings. Use the kernel view to diagnose OOM kills, camera-driver failures, I2C errors, and power/undervoltage warnings.
+
+Log cleanup is manual. **Clear log** truncates the selected application log in place after confirmation, preserving the file used by active logger processes. The watchdog reboot record cannot be cleared from the interface because it enforces the automatic-reboot circuit breaker.

@@ -1,8 +1,32 @@
 """
 Organisation of the ChronoRootControl application
 """
+import faulthandler
 import logging
+import os
+import sys
 from flask import Flask, render_template
+
+from config import Config
+
+# Logging must be ready before blueprint imports: importing app.focus also imports
+# the camera streamer, which creates its hardware logger immediately.
+for log_path in (Config.LOGFILE, Config.SHDL_LOG_FILE, Config.CRASH_LOG_FILE):
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    except OSError as exc:
+        print("Warning: could not create log directory for %s: %s" % (log_path, exc), file=sys.stderr)
+
+_crash_log_handle = None
+try:
+    _crash_log_handle = open(Config.CRASH_LOG_FILE, 'a')
+    faulthandler.enable(file=_crash_log_handle, all_threads=True)
+except (OSError, RuntimeError) as exc:
+    print("Warning: crash logging unavailable: %s" % exc, file=sys.stderr)
+    try:
+        faulthandler.enable(file=sys.stderr, all_threads=True)
+    except RuntimeError:
+        pass
 
 # Blueprints
 from app.experimentlist import main_page
@@ -14,8 +38,6 @@ from app.focus import focus_page
 from app.storage import storage_page
 from app.wifi import wifi_page
 from app.sync import sync_page
-
-from config import Config
 
 """
 Creation and configuration of the flask application
@@ -45,7 +67,10 @@ app.register_blueprint(sync_page, url_prefix='/sync')
 # Logging Setup
 app.logger.setLevel(logging.INFO)
 formatter = logging.Formatter(Config.LOG_FORMAT)
-handler = logging.FileHandler(Config.LOGFILE, mode='a')
+try:
+    handler = logging.FileHandler(Config.LOGFILE, mode='a')
+except OSError:
+    handler = logging.StreamHandler(sys.stderr)
 handler.setFormatter(formatter)
 handler.setLevel(logging.INFO)
 

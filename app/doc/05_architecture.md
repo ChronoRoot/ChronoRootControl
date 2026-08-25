@@ -43,6 +43,14 @@ To interface with the hardware, the RpiModule relies on factory patterns to load
 * The **Camera Selector** (phototron/camera_selector.py) manages the **IVPort Multiplexer**, enforcing a protocol where the I2C bus is actively probed before data transmission to prevent kernel panics.
 * The **Camera Driver** utilizes the modern **Picamera2** library. It dynamically applies hardware profiles (e.g., RPICAM_V2, RPICAM_V3) to set correct native resolutions, stream aspect ratios, and autofocus behaviors.
 
+### Live preview failure recovery
+
+The Focus preview is not a standalone daemon: `CameraStream` runs in a thread inside the single uWSGI web worker. It records lifecycle transitions (`starting`, `running`, `stalled`, `error`, `stopped`) in both worker-local state and the shared scheduler status. Camera-driver exceptions are propagated to the stream owner so the camera health, UI, hardware lock, and logs all reach a terminal state together.
+
+The kernel releases `/tmp/cam.lock` automatically if the worker is killed, but the RAM status file may still say `LOCKED`. Before Focus lock checks and hardware-watchdog reboot decisions, `SchedulerStatus.reconcile_hardware_lock()` probes the real OS lock. If the lock is free, stale telemetry is repaired instead of allowing an overdue capture to turn a dead preview worker into an unnecessary Raspberry Pi reboot.
+
+Catchable fatal Python/native signals are written to the crash log. OOM kills, SIGKILL, kernel camera faults, and power events cannot be caught in-process and must be diagnosed through the systemd/kernel journals exposed by the Configuration Debug panel.
+
 ## System Interfaces & Management Modules
 
 Beyond experiment scheduling and camera control, ChronoRoot provides standalone modules to handle system-level operations directly from the web interface.

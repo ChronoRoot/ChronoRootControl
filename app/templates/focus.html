@@ -38,7 +38,12 @@
             </div>
         {% else %}
             <div class="card shadow-sm bg-dark p-1">
-                <img src="{{ url_for('focus_page.video_feed', cam_id=cam_id) }}" class="img-fluid rounded" style="width: 100%; min-height: 480px; object-fit: cover; background-color: #111;" alt="Live camera feed"/>
+                <img id="camera-preview" src="{{ url_for('focus_page.video_feed', cam_id=cam_id) }}" class="img-fluid rounded" style="width: 100%; min-height: 480px; object-fit: cover; background-color: #111;" alt="Live camera feed"/>
+            </div>
+            <div id="stream-status-alert" class="alert alert-danger mt-3 mb-0" style="display: none;" role="alert">
+                <strong><i class="fas fa-exclamation-triangle mr-1"></i> Preview problem:</strong>
+                <span id="stream-status-message">The camera stream stopped.</span>
+                <a href="{{ url_for('config_page.conf') }}#debug-section" class="alert-link ml-1">Open Debug</a>
             </div>
         {% endif %}
     </div>
@@ -263,4 +268,42 @@
     }
 </script>
 {% endif %}
+<script>
+(function () {
+    const preview = document.getElementById('camera-preview');
+    const alertBox = document.getElementById('stream-status-alert');
+    const messageBox = document.getElementById('stream-status-message');
+    if (!preview || !alertBox || !messageBox) return;
+
+    const statusUrl = "{{ url_for('focus_page.stream_status', cam_id=cam_id) }}";
+    const failureStates = ['busy', 'stalled', 'error'];
+
+    function showStreamError(message) {
+        messageBox.textContent = message || 'The camera stream stopped unexpectedly.';
+        alertBox.style.display = 'block';
+    }
+
+    preview.addEventListener('error', function () {
+        showStreamError('The browser lost the camera feed.');
+    });
+
+    function refreshStreamStatus() {
+        fetch(statusUrl, {cache: 'no-store'})
+            .then(response => response.json())
+            .then(status => {
+                if (failureStates.includes(status.status)) {
+                    showStreamError(status.last_error);
+                } else if (status.status === 'running') {
+                    alertBox.style.display = 'none';
+                } else if (status.status === 'stopped' && status.last_error) {
+                    showStreamError(status.last_error);
+                }
+            })
+            .catch(() => showStreamError('Unable to read preview health from the web service.'));
+    }
+
+    refreshStreamStatus();
+    window.setInterval(refreshStreamStatus, 2000);
+})();
+</script>
 {% endblock %}
