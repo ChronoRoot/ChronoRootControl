@@ -500,29 +500,40 @@ def poll_module(base_url: str) -> dict:
 
 ## Software updates (`POST /api/update`)
 
-Pull the latest application code onto a module without touching the terminal. This is the endpoint the Fleet Commander uses to update the whole fleet. It runs `git pull --ff-only` inside the deployment directory (`/srv/ChronoRootControl`) and returns a classified, human-readable result.
+Pull the latest application code onto a module without touching the terminal. This is the endpoint the Fleet Commander uses to update the whole fleet.
 
-The call is hardened so it can **never hang a worker**:
+The confirmation flow starts with a non-destructive request, which runs `git pull --ff-only` inside `/srv/ChronoRootControl`. If local files or commits prevent the pull, the endpoint returns `409 Conflict` with `code: "force_required"` and `can_force: true`. The caller should ask the user whether to discard those local changes. Retry with `{"force": true}` only after an explicit Yes.
 
-- 120s hard timeout on the git subprocess.
-- `GIT_TERMINAL_PROMPT=0` and SSH `BatchMode=yes` — git fails fast instead of blocking on a credential or host-key prompt.
-- `-c safe.directory=<repo>` is injected per-call, so the common "detected dubious ownership" error (the service runs as root while the repo is owned by the user) is handled without editing any global git config.
+If the user answers No, do not send the force retry; the safe request has not discarded their files.
 
-No payload is required.
+Safe request (no payload is required):
 
 ```bash
 curl -X POST http://<module-ip>/api/update
 ```
 
-Outcomes:
+Confirmed force retry:
 
-| Result | HTTP | `message` |
-|--------|------|-----------|
-| Already current | 200 | "You are already running the latest version…" |
-| Updated | 200 | "Update successful! …" plus the `git pull` summary |
-| No internet | 400 | "No internet connection detected…" |
-| Blocked | 400 | Local changes or a diverged branch — manual intervention required |
-| Git error | 400 | Raw git error and exit code |
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"force": true}' \
+  http://<module-ip>/api/update
+```
+
+A force update fetches the configured upstream, resets the checked-out branch to it, and runs `git clean -fd`. It permanently discards tracked changes, local commits, and untracked files. Git-ignored files are preserved.
+
+Every response contains:
+
+- `result`: whether the requested operation completed successfully.
+- `code`: a stable machine-readable outcome such as `updated`, `up_to_date`, `force_required`, `network_error`, or `git_error`.
+- `message`: a short human-readable summary; raw Git output is kept out of the API response.
+- `changed`: whether files changed and a service restart/reboot is needed.
+- `can_force`: whether retrying with `force: true` is appropriate.
+
+Successful and already-current requests return HTTP 200. Destructive local-state conflicts return HTTP 409. Invalid requests and failures that force cannot solve, such as network, authentication, permission, timeout, or repository configuration errors, return HTTP 400 without prompting for force.
+
+The call is hardened with a 120-second timeout, disabled credential prompts, and SSH batch mode. Repository ownership errors are solved transparently for each Git subprocess: the canonical deployment path is trusted first, with a process-local `safe.directory=*` retry if required. No global Git configuration is changed.
 
 The pulled code takes effect only after the services restart or the Pi reboots. Follow a successful update with `GET /api/restart_service` (fast) or `POST /api/reboot` (full restart).
 
@@ -536,7 +547,7 @@ The pulled code takes effect only after the services restart or the Pi reboots. 
 | GET | `/api/config` | Read module configuration. |
 | PUT | `/api/config` | Update configuration. |
 | POST | `/api/sync/trigger` | Manual rclone sync. |
-| POST | `/api/update` | Pull latest code (`git pull`); restart/reboot to apply. |
+| POST | `/api/update` | Safely pull code or explicitly force remote state; restart/reboot to apply. |
 | POST | `/api/reboot` | Reboot module (use with care). |
 
 Endpoint-level schema detail also appears in the docstrings of `app/api.py` in the source tree.

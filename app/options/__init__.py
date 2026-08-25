@@ -283,8 +283,16 @@ def conf():
 
     # --- 5. Advanced: Software Update (git pull) ---
     if request.form.get('action') == 'update_app':
-        success, msg, changed = run_git_update()
-        return jsonify({'result': success, 'message': msg, 'changed': changed}), (200 if success else 400)
+        # Destructive behavior requires the frontend's explicit second request.
+        force = request.form.get('force') == 'true'
+        outcome = run_git_update(force=force)
+        if outcome['result']:
+            status = 200
+        elif outcome['code'] == 'force_required':
+            status = 409
+        else:
+            status = 400
+        return jsonify(outcome), status
 
     # --- 6. Restart services (lands back on this page after ~10s) ---
     if request.form.get('action') == 'restart_services':

@@ -566,10 +566,11 @@
             </div>
             <div class="card-body">
                 <p class="text-muted small">
-                    Pull the latest code from the repository (<code>git pull</code> in
-                    <code>/srv/ChronoRootControl</code>). This requires an internet connection.
-                    You will get a clear report of the result. Restart the services or reboot
-                    afterwards to run the new version.
+                    Safely pull the latest code in <code>/srv/ChronoRootControl</code>.
+                    If local files or commits block the update, you can explicitly force the
+                    device to match its remote branch. A force update discards tracked changes,
+                    local commits, and untracked files, but preserves ignored files. Restart the
+                    services or reboot afterwards to run the new version.
                 </p>
 
                 <form action="" method="post" name="update_setting" id="update_form" onsubmit="return handleAppUpdate(event);">
@@ -838,12 +839,40 @@
         const btn = document.getElementById('update_app_btn');
         const originalText = btn.innerHTML;
 
+        async function submitUpdate(force) {
+            const formData = new FormData(form);
+            formData.set('force', force ? 'true' : 'false');
+            const response = await fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            });
+            return response.json();
+        }
+
         btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Checking for updates...';
         btn.disabled = true;
 
         try {
-            const response = await fetch(window.location.href, { method: 'POST', body: new FormData(form) });
-            const data = await response.json();
+            let data = await submitUpdate(false);
+
+            if (data.code === 'force_required' && data.can_force) {
+                const confirmed = await asyncConfirm(
+                    "Force Software Update",
+                    "The safe update was blocked by local files or commits.\n\n" +
+                    "Continuing will permanently discard tracked changes, local commits, " +
+                    "and untracked files so this device matches its remote branch. " +
+                    "Ignored files are preserved.\n\nForce the update?",
+                    true
+                );
+
+                if (!confirmed) {
+                    showToast("Update cancelled. No destructive changes were made.", "info");
+                    return false;
+                }
+
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Forcing update...';
+                data = await submitUpdate(true);
+            }
 
             if (data.result && data.changed) {
                 // New code was pulled: offer to restart services. Clicking submits

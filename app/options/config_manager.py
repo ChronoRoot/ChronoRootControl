@@ -1,13 +1,16 @@
 import importlib.util
+import logging
 import os
 import re
 import time
-import os
 import subprocess
 import socket
 
 USER_CONFIG_PATH = '/srv/ChronoRootControl/user_config.py'
 REPO_DIR = '/srv/ChronoRootControl'
+GIT_TIMEOUT_SECONDS = 120
+
+logger = logging.getLogger(__name__)
 
 # RFC 952/1123 single-label hostname: 1-63 chars, alphanumeric + hyphens,
 # no leading/trailing hyphen.
@@ -152,55 +155,103 @@ def apply_hostname_config(new_hostname):
 
     return True, f"Hostname staged as '{new_hostname}'. It takes effect after the next reboot."
 
-def run_git_update():
-    """
-    Runs a plain 'git pull' inside REPO_DIR and returns
-    (success, message, changed) with a human-readable summary of what happened.
+def _git_result(result, code, message, changed=False, can_force=False):
+    """Build the stable result shape shared by the API and config website."""
+    return {
+        'result': result,
+        'code': code,
+        'message': message,
+        'changed': changed,
+        'can_force': can_force,
+    }
 
-    - success: the pull ran without error.
-    - changed: new code was actually pulled (False when already up to date, or
-      on any failure). Callers use this to decide whether a service restart is
-      needed.
 
-    Classifies the common outcomes explicitly:
-    - already up to date
-    - updated successfully (with a short summary of the pull)
-    - no internet / remote unreachable
-    - blocked by local changes or a diverged branch (manual intervention)
-    - any other git failure
+def _git_output(result):
+    """Return subprocess output for classification/logging, never for clients."""
+    return '\n'.join(
+        part.strip() for part in (result.stdout or '', result.stderr or '')
+        if part.strip()
+    )
+
+
+def _run_git(arguments):
     """
-    # Never let git block waiting for interactive input: disable the credential
-    # prompt (HTTPS) and force SSH into batch mode. Combined with the timeout,
-    # this guarantees the call returns instead of hanging on a private repo.
+    Run one non-interactive git command in the deployment repository.
+
+    The repository's canonical path is trusted only for this subprocess. If Git
+    still reports dubious ownership (common after cloning a complete module),
+    transparently retry with a process-local wildcard. No persistent git config
+    is changed to solve safe.directory ownership mismatches.
+    """
     env = dict(os.environ)
     env['GIT_TERMINAL_PROMPT'] = '0'
     env['GIT_SSH_COMMAND'] = 'ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new'
 
-    # Failsafe for "detected dubious ownership": the service runs as root while
-    # the repo is owned by the user (or vice versa). Inject safe.directory for
-    # THIS command only via -c, so we never mutate any global git config.
-    try:
-        result = subprocess.run(
-            ['git', '-c', f'safe.directory={REPO_DIR}', '-C', REPO_DIR, 'pull', '--ff-only'],
-            capture_output=True, text=True, timeout=120, env=env
+    trusted_path = os.path.realpath(REPO_DIR)
+    command = [
+        'git', '-c', f'safe.directory={trusted_path}',
+        '-C', REPO_DIR, *arguments,
+    ]
+    result = subprocess.run(
+        command, capture_output=True, text=True,
+        timeout=GIT_TIMEOUT_SECONDS, env=env
+    )
+
+    low = _git_output(result).lower()
+    ownership_error = (
+        'dubious ownership' in low
+        or 'detected dubious ownership' in low
+        or 'safe.directory' in low
+    )
+    if result.returncode != 0 and ownership_error:
+        logger.info(
+            "Retrying git command with process-local safe.directory wildcard"
         )
-    except subprocess.TimeoutExpired:
-        return False, ("The update timed out after 2 minutes. This usually means a slow "
-                       "or dropped internet connection. Please try again."), False
-    except FileNotFoundError:
-        return False, "git is not installed on this system, so the app cannot self-update.", False
+        result = subprocess.run(
+            ['git', '-c', 'safe.directory=*', '-C', REPO_DIR, *arguments],
+            capture_output=True, text=True,
+            timeout=GIT_TIMEOUT_SECONDS, env=env
+        )
 
-    out = (result.stdout or '').strip()
-    err = (result.stderr or '').strip()
-    combined = '\n'.join(part for part in (out, err) if part).strip()
-    low = combined.lower()
+    return result
 
-    if result.returncode == 0:
-        if 'already up to date' in low or 'already up-to-date' in low:
-            return True, "You are already running the latest version. No update was needed.", False
-        summary = out or "Changes were pulled from the remote repository."
-        return True, ("Update successful! The latest code has been pulled.\n\n"
-                       f"{summary}\n\nRestart the services or reboot to run the new version."), True
+
+def _classify_git_failure(result, allow_force=False):
+    """Convert verbose git stderr into a concise, actionable update result."""
+    output = _git_output(result)
+    low = output.lower()
+    logger.warning(
+        "Software update git command failed with exit code %s: %s",
+        result.returncode, output or 'no output'
+    )
+
+    destructive_markers = [
+        'would be overwritten', 'local changes', 'not possible to fast-forward',
+        'diverging', 'diverged', 'non-fast-forward', 'unmerged', 'needs merge',
+        'please commit your changes', 'please stash them',
+        'untracked working tree files',
+    ]
+    if allow_force and any(marker in low for marker in destructive_markers):
+        return _git_result(
+            False,
+            'force_required',
+            "The safe update was blocked by local files or commits. "
+            "A force update can replace them with the remote version.",
+            can_force=True,
+        )
+
+    authentication_markers = [
+        'authentication failed', 'permission denied (publickey)',
+        'could not read username', 'terminal prompts disabled',
+        'repository not found',
+    ]
+    if any(marker in low for marker in authentication_markers):
+        return _git_result(
+            False,
+            'authentication_error',
+            "The remote repository rejected this device's credentials. "
+            "Check the configured Git credentials.",
+        )
 
     network_markers = [
         'could not resolve host', 'unable to access', 'connection timed out',
@@ -208,16 +259,189 @@ def run_git_update():
         'temporary failure in name resolution', 'failed to connect', 'connection refused',
     ]
     if any(marker in low for marker in network_markers):
-        return False, ("No internet connection detected. The device could not reach the "
-                       "remote repository. Check the network and try again."), False
+        return _git_result(
+            False,
+            'network_error',
+            "The device could not reach the remote repository. "
+            "Check its network connection and try again.",
+        )
 
-    conflict_markers = [
-        'would be overwritten', 'local changes', 'not possible to fast-forward',
-        'diverging', 'non-fast-forward', 'unmerged', 'needs merge',
+    repository_markers = [
+        'not a git repository', 'no such file or directory',
+        'no tracking information', 'has no upstream branch',
+        'unknown revision or path not in the working tree',
+        'does not appear to be a git repository',
     ]
-    if any(marker in low for marker in conflict_markers):
-        return False, ("Update blocked: this device has local changes or its branch has "
-                        "diverged from the remote. Manual intervention is required.\n\n"
-                        f"{combined}"), False
+    if any(marker in low for marker in repository_markers):
+        return _git_result(
+            False,
+            'repository_error',
+            "The deployment repository or its upstream is not configured correctly.",
+        )
 
-    return False, f"Update failed (git exit code {result.returncode}):\n\n{combined or 'Unknown error.'}", False
+    permission_markers = [
+        'permission denied', 'cannot lock ref', 'unable to create',
+        'index.lock', 'could not open',
+    ]
+    if any(marker in low for marker in permission_markers):
+        return _git_result(
+            False,
+            'permission_error',
+            "Git could not write to the deployment repository. "
+            "Check its permissions and ensure no other Git process is running.",
+        )
+
+    return _git_result(
+        False,
+        'git_error',
+        f"Git could not complete the update (exit code {result.returncode}). "
+        "Check the service log for details.",
+    )
+
+
+def _read_head():
+    """Read HEAD, returning either its hash or a classified failure."""
+    result = _run_git(['rev-parse', 'HEAD'])
+    if result.returncode != 0:
+        return None, _classify_git_failure(result)
+    return (result.stdout or '').strip(), None
+
+
+def _run_safe_git_update():
+    old_head, failure = _read_head()
+    if failure:
+        return failure
+
+    pull = _run_git(['pull', '--ff-only'])
+    if pull.returncode != 0:
+        return _classify_git_failure(pull, allow_force=True)
+
+    new_head, failure = _read_head()
+    if failure:
+        return failure
+
+    # A local branch that is ahead of its upstream makes `git pull` report
+    # success even though the checkout does not match the fleet's remote state.
+    upstream = _run_git([
+        'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}',
+    ])
+    if upstream.returncode != 0:
+        return _classify_git_failure(upstream)
+
+    remote_ref = (upstream.stdout or '').strip()
+    ahead = _run_git(['rev-list', '--count', f'{remote_ref}..HEAD'])
+    if ahead.returncode != 0:
+        return _classify_git_failure(ahead)
+
+    try:
+        ahead_count = int((ahead.stdout or '0').strip())
+    except ValueError:
+        return _git_result(
+            False,
+            'git_error',
+            "Git returned an unexpected branch comparison result. "
+            "Check the service log for details.",
+        )
+
+    if ahead_count:
+        return _git_result(
+            False,
+            'force_required',
+            f"The device has {ahead_count} local commit"
+            f"{'s' if ahead_count != 1 else ''} not present on its remote branch. "
+            "A force update can replace them with the remote version.",
+            can_force=True,
+        )
+
+    if old_head == new_head:
+        return _git_result(
+            True,
+            'up_to_date',
+            "This device is already running the latest remote version.",
+        )
+
+    return _git_result(
+        True,
+        'updated',
+        f"Software updated from {old_head[:8]} to {new_head[:8]}. "
+        "Restart the services or reboot to run the new version.",
+        changed=True,
+    )
+
+
+def _run_forced_git_update():
+    old_head, failure = _read_head()
+    if failure:
+        return failure
+
+    status = _run_git(['status', '--porcelain'])
+    if status.returncode != 0:
+        return _classify_git_failure(status)
+    had_local_files = bool((status.stdout or '').strip())
+
+    fetch = _run_git(['fetch', '--prune'])
+    if fetch.returncode != 0:
+        return _classify_git_failure(fetch)
+
+    upstream = _run_git([
+        'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}',
+    ])
+    if upstream.returncode != 0:
+        return _classify_git_failure(upstream)
+    remote_ref = (upstream.stdout or '').strip()
+
+    reset = _run_git(['reset', '--hard', remote_ref])
+    if reset.returncode != 0:
+        return _classify_git_failure(reset)
+
+    clean = _run_git(['clean', '-fd'])
+    if clean.returncode != 0:
+        return _classify_git_failure(clean)
+
+    new_head, failure = _read_head()
+    if failure:
+        return failure
+
+    changed = had_local_files or old_head != new_head
+    if changed:
+        return _git_result(
+            True,
+            'force_updated',
+            f"Force update completed at {new_head[:8]}. The device now matches "
+            "its remote branch. Restart the services or reboot to use it.",
+            changed=True,
+        )
+
+    return _git_result(
+        True,
+        'up_to_date',
+        "This device already matches its remote branch; no files were changed.",
+    )
+
+
+def run_git_update(force=False):
+    """
+    Update the deployment checkout and return a structured, readable result.
+
+    A normal update is non-destructive. If local files or commits prevent it,
+    the result has code ``force_required`` and callers may explicitly retry
+    with ``force=True``. A force update resets to the configured upstream and
+    deletes untracked files, while preserving ignored files.
+    """
+    try:
+        if force:
+            return _run_forced_git_update()
+        return _run_safe_git_update()
+    except subprocess.TimeoutExpired:
+        return _git_result(
+            False,
+            'timeout',
+            "The update timed out after 2 minutes. Check the device's network "
+            "connection and try again.",
+        )
+    except FileNotFoundError:
+        return _git_result(
+            False,
+            'git_unavailable',
+            "Git is not installed on this device, so it cannot self-update.",
+        )

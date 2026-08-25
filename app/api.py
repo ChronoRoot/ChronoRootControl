@@ -369,36 +369,65 @@ def create_experiment():
 @api_exp.route('/update', methods=['POST'])
 def update_software():
     """
-    Pull the latest application code from the git remote (fleet-wide software update).
+    Update application code from the configured git upstream.
 
     **Endpoint:** ``POST /api/update``
 
-    Runs ``git pull --ff-only`` inside the deployment directory
-    (``/srv/ChronoRootControl``) and returns a classified, human-readable result.
-    Intended for the Fleet Commander to update modules headlessly. The call is
-    hardened so it can never hang the worker:
+    With no payload (or ``{"force": false}``), runs a non-destructive
+    ``git pull --ff-only``. If local files or commits block that update, returns
+    HTTP 409 with ``code="force_required"``. The caller may ask the user and
+    retry with ``{"force": true}`` to reset to the upstream and remove untracked
+    files. Ignored files are preserved.
 
-    - A 120s hard timeout on the subprocess.
-    - ``GIT_TERMINAL_PROMPT=0`` and SSH ``BatchMode=yes`` so git fails fast instead
-      of blocking on credential/host-key prompts.
-    - ``-c safe.directory=<repo>`` injected per-call to tolerate the root-vs-user
-      ownership mismatch without mutating any global git config.
+    Dubious repository ownership is resolved per subprocess without changing
+    persistent git configuration. Git output is logged server-side and replaced
+    in this response by a concise, classified message.
 
     The new code takes effect only after the services restart or the Pi reboots
     (``GET /api/restart_service`` or ``POST /api/reboot``).
 
     Expected JSON Payload:
-    None
+    Optional: ``{"force": <boolean>}``
 
     Returns:
-        200 OK: {"result": True, "changed": <bool>, "message": "<up-to-date | pulled summary>"}
-        400 Bad Request: {"result": False, "changed": False, "message": "<no internet | blocked | git error>"}
+        200 OK: successful update or already current.
+        409 Conflict: local state requires an explicit force retry.
+        400 Bad Request: invalid input or a non-destructive update failure.
 
-    ``changed`` is True only when new code was actually pulled (False when already
-    up to date), so the fleet manager knows whether a restart/reboot is needed.
+    Every response contains ``result``, ``code``, ``message``, ``changed``, and
+    ``can_force``. ``changed`` tells the fleet manager whether a restart/reboot
+    is needed.
     """
-    success, msg, changed = run_git_update()
-    return jsonify({'result': success, 'message': msg, 'changed': changed}), (200 if success else 400)
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return jsonify({
+            'result': False,
+            'code': 'invalid_request',
+            'message': "The request body must be a JSON object.",
+            'changed': False,
+            'can_force': False,
+        }), 400
+
+    force = payload.get('force', False)
+    if not isinstance(force, bool):
+        return jsonify({
+            'result': False,
+            'code': 'invalid_request',
+            'message': "The 'force' field must be true or false.",
+            'changed': False,
+            'can_force': False,
+        }), 400
+
+    outcome = run_git_update(force=force)
+    if outcome['result']:
+        status = 200
+    elif outcome['code'] == 'force_required':
+        status = 409
+    else:
+        status = 400
+    return jsonify(outcome), status
 
 @api_exp.route('/<expid>', methods=['GET'])
 def get_experiment(expid):
