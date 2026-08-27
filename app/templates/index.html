@@ -554,11 +554,16 @@
             }
         }
 
-        // --- Running experiment cards: live progress ---
+        // --- Running experiment cards: live progress + next-run target ---
         var jobs = data.jobs || {};
         document.querySelectorAll('[data-job-id]').forEach(function(card) {
             var job = jobs[card.getAttribute('data-job-id')];
-            if (!job || !job.progress) return;
+            if (!job) return;
+            var timer = card.querySelector('.countdown-timer');
+            if (timer) {
+                timer.setAttribute('data-time', job.next_run_time || '');
+            }
+            if (!job.progress) return;
             var prog = job.progress;
             var percent = prog.expected > 0 ? Math.round((prog.taken / prog.expected) * 1000) / 10 : 0;
             var text = card.querySelector('[data-job-progress-text]');
@@ -566,6 +571,12 @@
             if (text) text.textContent = prog.taken + ' / ' + prog.expected + ' (' + percent + '%)';
             if (pbar) pbar.style.width = percent + '%';
         });
+
+        if (data.system_time) {
+            var parsed = new Date(String(data.system_time).replace(' ', 'T')).getTime();
+            if (!isNaN(parsed)) remoteTime = parsed - 1000;
+        }
+        updateLiveClocks();
     }
 
     function startDashboardAutoRefresh() {

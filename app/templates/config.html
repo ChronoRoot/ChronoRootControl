@@ -123,9 +123,10 @@
                     <h5 class="mb-0"><i class="far fa-clock mr-2"></i>Date & Time</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted small">Current system time: <strong class="text-dark">{{ date }}</strong></p>
-                    <form action="" method="post" name="app_setting">
+                    <p class="text-muted small">Current system time: <strong class="text-dark" data-live-update="system-time">{{ date }}</strong></p>
+                    <form action="" method="post" name="app_setting" onsubmit="return handleHardwareSubmit(event);">
                         {{ app_setting_form.hidden_tag() }}
+                        <input type="hidden" name="action" value="set_time">
                         <div class="custom-control custom-switch mb-3">
                             {{ app_setting_form.sync_mode(class="custom-control-input", id="sync_mode") }}
                             <label class="custom-control-label" for="sync_mode">Auto-Sync Time (NTP)</label>
@@ -147,7 +148,7 @@
                                 </div>
                             </div>
                         </div>
-                        <button type="submit" name="action" value="set_time" class="btn btn-info btn-sm btn-block mt-3">Apply Time</button>
+                        <button type="submit" class="btn btn-info btn-sm btn-block mt-3">Apply Time</button>
                     </form>
                     {% for error in app_setting_form.systemDate.errors %}
                     <div class="alert alert-danger mt-2 small py-1">{{ error }}</div>
@@ -291,6 +292,7 @@
                 <h5 class="mb-0"><i class="fas fa-sliders-h mr-2"></i>Focus & Testing</h5>
                 
                 <div class="d-flex align-items-center">
+                    <span data-live-update="next-picture-header">
                     {% if scheduler_info.next_picture and scheduler_info.next_picture != 'None' %}
                     <span class="d-none d-lg-inline-flex align-items-center bg-white border rounded px-2 py-1 shadow-sm mr-3" style="font-size: 0.9rem;">
                         <i class="far fa-calendar-check text-muted mr-1"></i>
@@ -301,6 +303,7 @@
                         </span>
                     </span>
                     {% endif %}
+                    </span>
 
                     <div data-live-update="camera-list-lock" class="d-inline-block">
                         {% set lock = scheduler_info.lock_info %}
@@ -994,6 +997,12 @@
     $('#hw_camera').change(updateAutofocusFields);
     updateAutofocusFields();
 
+    // Device clock from the last server render — same naive local string as next_picture.
+    // Do not use Date.now(): a browser/Pi clock skew (or a system-time change) makes
+    // a still-valid next capture look like "Due Now".
+    let remoteTime = new Date("{{ date }}".replace(" ", "T")).getTime();
+    if (isNaN(remoteTime)) { remoteTime = Date.now(); }
+
     // --- 1. The Multi-Badge Countdown Function ---
     function updateCountdownDisplays() {
         const badges = document.querySelectorAll('.countdown-badge');
@@ -1010,7 +1019,7 @@
 
             const safeDateString = targetTimeString.replace(' ', 'T');
             const targetTime = new Date(safeDateString).getTime();
-            const now = new Date().getTime();
+            const now = remoteTime;
 
             if (isNaN(targetTime)) return;
 
@@ -1047,15 +1056,12 @@
     // --- 2. Update the Auto Refresh with DOM Diffing ---
     function startStatusAutoRefresh() {
         setInterval(function() {
-            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT' || document.activeElement.tagName === 'TEXTAREA') {
-                return;
-            }
-
             fetch(window.location.href)
                 .then(response => response.text())
                 .then(html => {
                     const parser = new DOMParser();
                     const doc = parser.parseFromString(html, "text/html");
+                    const active = document.activeElement;
                     
                     // SURGICAL UPDATE: Find every element flagged for live updates
                     doc.querySelectorAll('[data-live-update]').forEach(newEl => {
@@ -1063,8 +1069,8 @@
                         const oldEl = document.querySelector(`[data-live-update="${id}"]`);
                         
                         if (oldEl) {
-                            // NEW: If this element contains a button actively processing a JS fetch, skip it.
-                            if (oldEl.classList.contains('js-active-btn') || oldEl.querySelector('.js-active-btn')) {
+                            // Skip a node that holds focus or a button actively processing a JS fetch.
+                            if (oldEl.contains(active) || oldEl.classList.contains('js-active-btn') || oldEl.querySelector('.js-active-btn')) {
                                 return; 
                             }
 
@@ -1075,6 +1081,20 @@
                             }
                         }
                     });
+
+                    // Checkbox `checked` is a live property, not innerHTML — keep the
+                    // IR switch aligned with the same GPIO snapshot as the ON/OFF badge.
+                    const newToggle = doc.getElementById('backlight-ir');
+                    const oldToggle = document.getElementById('backlight-ir');
+                    if (newToggle && oldToggle && !oldToggle.disabled && oldToggle !== active) {
+                        oldToggle.checked = newToggle.hasAttribute('checked');
+                    }
+
+                    const timeEl = document.querySelector('[data-live-update="system-time"]');
+                    if (timeEl) {
+                        const parsed = new Date(timeEl.textContent.trim().replace(' ', 'T')).getTime();
+                        if (!isNaN(parsed)) remoteTime = parsed;
+                    }
 
                     // Update the countdown logic immediately after swapping the text
                     updateCountdownDisplays();
@@ -1088,7 +1108,10 @@
         startStatusAutoRefresh();
         
         // Run the countdown calculation every 1 second
-        setInterval(updateCountdownDisplays, 1000);
+        setInterval(function() {
+            remoteTime += 1000;
+            updateCountdownDisplays();
+        }, 1000);
         
         // Fire it immediately once so there's no 1-second delay on page load
         updateCountdownDisplays(); 
@@ -1106,6 +1129,7 @@
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                toggleInput.checked = !!data.light_state;
                 const badge = document.querySelector('[data-live-update="lighting-badge"]');
                 if (badge) {
                     if (data.light_state) {

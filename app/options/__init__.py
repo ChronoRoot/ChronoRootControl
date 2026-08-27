@@ -157,10 +157,10 @@ def conf():
                 flash(f'System time and preferences updated successfully.', 'success')
             else:
                 flash(f'Time applied, but failed to save config to disk: {save_msg}', 'warning')
+            return render_template('restarting.html', target_url=url_for('config_page.conf'))
         else:
             flash(f'Error updating time: {msg}', 'danger')
-            
-        return redirect(url_for('config_page.conf'))
+            return redirect(url_for('config_page.conf'))
 
     # --- 2. Hardware Settings Logic ---
     if request.form.get('action') == 'set_hw':

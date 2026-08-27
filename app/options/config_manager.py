@@ -74,16 +74,6 @@ def apply_system_time_config(mode, date_str=None, timezone=None, ntp_server=None
     Interfaces with Raspberry Pi OS to set time, timezone, and NTP.
     """
     try:
-        # 1. Set Timezone
-        if timezone:
-            subprocess.run(['sudo', 'timedatectl', 'set-timezone', timezone], check=True)
-            
-            # CRITICAL FIX: Force the running Python Flask app to reload the timezone!
-            if 'TZ' in os.environ:
-                del os.environ['TZ']
-            time.tzset() 
-
-        # 2. Apply Time Mode
         if mode == 'network':
             target_server = ntp_server if ntp_server else "pool.ntp.org"
             
@@ -109,9 +99,21 @@ def apply_system_time_config(mode, date_str=None, timezone=None, ntp_server=None
             subprocess.run(['sudo', 'timedatectl', 'set-ntp', 'true'], check=True)
             subprocess.run(['sudo', 'systemctl', 'restart', 'systemd-timesyncd'], check=True)
 
-        elif mode == 'manual' and date_str:
+        elif mode == 'manual':
+            if not date_str:
+                return False, "Manual time requires a date. Turn off Auto-Sync Time and set the date, or wait until NTP is reachable."
             subprocess.run(['sudo', 'timedatectl', 'set-ntp', 'false'], check=True)
             subprocess.run(['sudo', 'date', '-s', date_str], check=True)
+
+        # Timezone only after NTP/manual succeeds so a failed probe cannot
+        # change OS zone while user_config.py is left unsaved.
+        if timezone:
+            subprocess.run(['sudo', 'timedatectl', 'set-timezone', timezone], check=True)
+            
+            # CRITICAL FIX: Force the running Python Flask app to reload the timezone!
+            if 'TZ' in os.environ:
+                del os.environ['TZ']
+            time.tzset()
             
         return True, "Time configuration applied successfully."
         

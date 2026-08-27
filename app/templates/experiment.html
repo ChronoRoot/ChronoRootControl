@@ -628,30 +628,36 @@
     // ==============================================================
     function startDashboardAutoRefresh() {
         setInterval(function() {
-            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
-                return;
-            }
+            var pageFetch = fetch(window.location.href).then(function(response) { return response.text(); });
+            var statusFetch = fetch("{{ url_for('api_exp.get_system_status') }}")
+                .then(function(response) { return response.json(); })
+                .catch(function() { return null; });
 
-            fetch(window.location.href)
-                .then(response => response.text())
-                .then(html => {
+            Promise.all([pageFetch, statusFetch])
+                .then(function(results) {
+                    var html = results[0];
+                    var status = results[1];
                     var parser = new DOMParser();
                     var doc = parser.parseFromString(html, "text/html");
-                    
-                    // 1. Refresh the top dashboard
-                    if(doc.getElementById('experiment-dashboard-panel')) {
+                    var active = document.activeElement;
+
+                    var dash = document.getElementById('experiment-dashboard-panel');
+                    if (doc.getElementById('experiment-dashboard-panel') && dash && !dash.contains(active)) {
                         $('#experiment-dashboard-panel').html(doc.getElementById('experiment-dashboard-panel').innerHTML);
                     }
-                    
-                    // 2. Refresh the Action buttons so they change if the experiment finishes
-                    if(doc.getElementById('action-buttons-panel')) {
+
+                    var actions = document.getElementById('action-buttons-panel');
+                    if (doc.getElementById('action-buttons-panel') && actions && !actions.contains(active)) {
                         $('#action-buttons-panel').html(doc.getElementById('action-buttons-panel').innerHTML);
                     }
-                    
-                    // 3. INSTANTLY re-apply the clock and countdown so it never flickers to "Loading..."
-                    remoteTime -= 1000; 
+
+                    if (status && status.system_time) {
+                        var parsed = new Date(String(status.system_time).replace(' ', 'T')).getTime();
+                        if (!isNaN(parsed)) remoteTime = parsed;
+                    }
+
+                    remoteTime -= 1000;
                     updateServerClock();
-                    
                 })
                 .catch(err => console.warn('Background refresh failed', err));
         }, 5000); 

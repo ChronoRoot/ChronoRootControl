@@ -36,6 +36,7 @@ function toggleLight(isTurningOn) {
             const text = document.getElementById('light-status-text');
             const icon = document.getElementById('light-status-icon');
             
+            toggleInput.checked = !!data.light_state;
             if (data.light_state) {
                 badge.className = "badge badge-warning";
                 text.innerText = "ON ";
