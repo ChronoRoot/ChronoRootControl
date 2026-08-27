@@ -2,8 +2,9 @@
 # Configuration management
 #
 
+import os
 from datetime import datetime
-from flask import Blueprint, flash, jsonify, render_template, request, url_for, redirect
+from flask import Blueprint, flash, jsonify, render_template, request, url_for, redirect, send_file
 
 from .form import (
     AppSettingsForm,
@@ -17,6 +18,7 @@ from .debug_manager import (
     get_debug_snapshot,
     get_journal,
     tail_log,
+    _log_definitions,
 )
 from config import Config
 
@@ -41,6 +43,28 @@ def debug_status():
 @config_page.route('/debug/log/<log_id>', methods=['GET'])
 def debug_log(log_id):
     try:
+        if request.args.get('download'):
+            definition = _log_definitions().get(log_id)
+            if definition is None:
+                return jsonify({"error": "Unknown log."}), 404
+            path = definition["path"]
+            if not os.path.isfile(path):
+                return jsonify({"error": "Log file does not exist yet."}), 404
+            filename = '%s.log' % log_id
+            try:
+                return send_file(
+                    path,
+                    mimetype='text/plain; charset=utf-8',
+                    as_attachment=True,
+                    download_name=filename,
+                )
+            except TypeError:
+                return send_file(
+                    path,
+                    mimetype='text/plain; charset=utf-8',
+                    as_attachment=True,
+                    attachment_filename=filename,
+                )
         return jsonify(tail_log(log_id, request.args.get("bytes")))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 404

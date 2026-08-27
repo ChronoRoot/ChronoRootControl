@@ -679,6 +679,9 @@
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="loadDebugLog()" id="debug-view-log-btn" disabled>
                             <i class="fas fa-file-alt mr-1"></i> View tail
                         </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="downloadDebugLog()" id="debug-download-log-btn" disabled>
+                            <i class="fas fa-download mr-1"></i> Download
+                        </button>
                         <button type="button" class="btn btn-sm btn-outline-danger" onclick="clearDebugLog()" id="debug-clear-log-btn" disabled>
                             <i class="fas fa-eraser mr-1"></i> Clear log
                         </button>
@@ -1427,6 +1430,7 @@
         const logId = document.getElementById('debug-log-select').value;
         const log = debugLogs.find(item => item.id === logId);
         document.getElementById('debug-view-log-btn').disabled = !log;
+        document.getElementById('debug-download-log-btn').disabled = !log;
         document.getElementById('debug-clear-log-btn').disabled = !log || !log.clearable;
         document.getElementById('debug-log-meta').textContent = log
             ? `${log.path} | ${formatDebugBytes(log.size_bytes)} | Modified: ${log.modified_at || 'never'}`
@@ -1446,6 +1450,12 @@
         } catch (error) {
             setDebugOutput('Log read failed', error.message);
         }
+    }
+
+    function downloadDebugLog() {
+        const logId = document.getElementById('debug-log-select').value;
+        if (!logId) return;
+        window.location.href = DEBUG_LOG_URL.replace('__LOG__', encodeURIComponent(logId)) + '?download=1';
     }
 
     async function clearDebugLog() {

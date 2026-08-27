@@ -40,7 +40,10 @@ log = logging.getLogger(__name__)
 try:
     scheduler
 except NameError:
-    scheduler = BackgroundScheduler(executors={'default': ThreadPoolExecutor(2)})
+    scheduler = BackgroundScheduler(
+        executors={'default': ThreadPoolExecutor(2)},
+        job_defaults={'misfire_grace_time': 15},
+    )
 
 try:
     scheduler_status
@@ -93,8 +96,20 @@ def shed_evt_job_error(event):
     exp = load_exp_safe(event.job_id)
     if not exp: return
 
-    # Safely get the error message (handles EVENT_JOB_MISSED lacking an exception)
-    error_msg = str(getattr(event, 'exception', 'Job missed scheduled run.'))
+    # EVENT_JOB_MISSED still has .exception, set to None — getattr's default
+    # never runs, so str(None) used to become the UI text "None".
+    exception = getattr(event, 'exception', None)
+    if exception is not None:
+        error_msg = str(exception)
+    else:
+        error_msg = "Job missed scheduled run."
+        scheduled = getattr(event, 'scheduled_run_time', None)
+        if scheduled is not None:
+            try:
+                now = datetime.now(scheduled.tzinfo) if scheduled.tzinfo else datetime.now()
+                error_msg = "Job missed scheduled run (late by %s)." % (now - scheduled)
+            except (TypeError, ValueError):
+                error_msg = "Job missed scheduled run."
     exp.log_event(error_msg)
     
     if exp.status not in ("ERROR", "CANCELLED", "FINISHED"):
@@ -574,7 +589,8 @@ class ChiefOperator(object):
             end_date=end_dt,
             minutes=int(exp.interval),
             id=exp.expid,
-            replace_existing=True
+            replace_existing=True,
+            misfire_grace_time=15,
         )
         
         if start_dt > now:
