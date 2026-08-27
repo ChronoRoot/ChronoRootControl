@@ -77,12 +77,11 @@ def run_rclone_sync():
     destination = custom_path if remote_type == 'local' else f"chronosync:{custom_path}"
 
     # Initialize RAM-disk file state
-    status.load()
-    status.state.setdefault("sync", {})
-    status.state["sync"]["is_syncing"] = True
-    status.state["sync"]["last_start"] = datetime.now().strftime(Config.PRETTY_FORMAT)
-    status.state["sync"]["status_msg"] = "Calculating transfer size..."
-    status.write()
+    status.update_sync_fields(
+        is_syncing=True,
+        last_start=datetime.now().strftime(Config.PRETTY_FORMAT),
+        status_msg="Calculating transfer size...",
+    )
 
     # Optimized logging setup to get streamlined output updates
     cmd = [
@@ -127,9 +126,7 @@ def run_rclone_sync():
                 latest_progress = clean_line
                 now_ts = time.monotonic()
                 if now_ts - last_progress_write >= PROGRESS_WRITE_INTERVAL:
-                    status.load()
-                    status.state["sync"]["status_msg"] = latest_progress
-                    status.write()
+                    status.update_sync_fields(status_msg=latest_progress)
                     last_progress_write = now_ts
             else:
                 if "INFO" not in clean_line and "DEBUG" not in clean_line:
@@ -139,32 +136,33 @@ def run_rclone_sync():
 
         process.wait()
         
-        status.load()
         if process.returncode == 0:
-            status.state["sync"]["is_syncing"] = False
-            status.state["sync"]["status_msg"] = "Standby" 
-            status.state["sync"]["last_success"] = datetime.now().strftime(Config.PRETTY_FORMAT)
-            status.state["sync"]["last_error"] = None 
-            status.write()
+            status.update_sync_fields(
+                is_syncing=False,
+                status_msg="Standby",
+                last_success=datetime.now().strftime(Config.PRETTY_FORMAT),
+                last_error=None,
+            )
             return True, "Success"
         else:
             error_details = " | ".join(last_log_lines)
             if not error_details: error_details = "Unknown Error"
             log.error(f"Rclone failed with code {process.returncode}. Details: {error_details}")
             
-            status.state["sync"]["is_syncing"] = False
-            status.state["sync"]["status_msg"] = "Standby" 
-            status.state["sync"]["last_error"] = error_details 
-            status.write()
+            status.update_sync_fields(
+                is_syncing=False,
+                status_msg="Standby",
+                last_error=error_details,
+            )
             return False, f"Transfer failed: {error_details}"
             
     except Exception as e:
         log.error(f"Rclone failed catastrophically: {e}")
-        status.load()
-        status.state["sync"]["is_syncing"] = False
-        status.state["sync"]["status_msg"] = "Standby" 
-        status.state["sync"]["last_error"] = f"Catastrophic failure: {e}" 
-        status.write()
+        status.update_sync_fields(
+            is_syncing=False,
+            status_msg="Standby",
+            last_error=f"Catastrophic failure: {e}",
+        )
         return False, "Transfer failed."
 
 def test_rclone_connection(remote_type, host, user, password, port=None):

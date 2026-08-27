@@ -148,9 +148,7 @@ class AutoSyncDaemon(threading.Thread):
                 interval_mins = int(getattr(Config, 'SYNC_INTERVAL', 60))
                 
                 # 2. Write enabled status to shared RAM
-                scheduler_status.load()
-                scheduler_status.state["sync"]["sync_enabled"] = is_enabled
-                scheduler_status.write()
+                scheduler_status.update_sync_fields(sync_enabled=is_enabled)
                 
                 if is_enabled:
                     self.logger.info("Auto-Sync triggered.")
@@ -162,17 +160,15 @@ class AutoSyncDaemon(threading.Thread):
                     now = datetime.now()
                     next_time = now + timedelta(minutes=interval_mins)
                     
-                    scheduler_status.load()
-                    scheduler_status.state["sync"]["next_sync"] = next_time.strftime(Config.PRETTY_FORMAT)
-                    scheduler_status.write()
+                    scheduler_status.update_sync_fields(
+                        next_sync=next_time.strftime(Config.PRETTY_FORMAT)
+                    )
                     
                     # 4. Sleep for the exact interval
                     time.sleep(interval_mins * 60)
                 else:
                     # 5. If disabled, tell the UI and sleep for a minute to check again
-                    scheduler_status.load()
-                    scheduler_status.state["sync"]["next_sync"] = "Disabled"
-                    scheduler_status.write()
+                    scheduler_status.update_sync_fields(next_sync="Disabled")
                     
                     time.sleep(60)
                     

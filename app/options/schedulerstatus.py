@@ -293,46 +293,78 @@ class SchedulerStatus(object):
         if self.log:
             self.log.error('CRITICAL: Could not acquire lock to write scheduler status after max retries.')
 
+    def _mutate_state(self, mutator):
+        """Read-modify-write the status file under one exclusive lock.
+
+        load()+write() on a shared in-memory snapshot races with rclone's 3s
+        progress flush and the watchdog: the slower writer puts an older copy
+        back and the UI keeps a past next_run_time (false picture-overdue).
+        """
+        for _attempt in range(10):
+            try:
+                with open(self.status_file, "a+") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    try:
+                        handle.seek(0)
+                        raw = handle.read()
+                        if not raw.strip():
+                            latest = json.loads(json.dumps(self.default_state))
+                        else:
+                            try:
+                                latest = json.loads(raw)
+                            except json.JSONDecodeError:
+                                if self.log:
+                                    self.log.error("Refusing to overwrite corrupted status during mutate.")
+                                return False
+                        mutator(latest)
+                        handle.seek(0)
+                        handle.truncate()
+                        json.dump(latest, handle, indent=2)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                        self.state = latest
+                        return True
+                    finally:
+                        fcntl.flock(handle, fcntl.LOCK_UN)
+            except (BlockingIOError, IOError):
+                time.sleep(0.05)
+        if self.log:
+            self.log.error("CRITICAL: Could not acquire lock to mutate scheduler status after max retries.")
+        return False
+
     # ------------------------------------------------------------------
     # SPECIFIC UPDATERS (Helpers to modify the dictionary cleanly)
     # ------------------------------------------------------------------
 
     def update_hardware_status(self, cam_id=None, cam_status=None, last_pic=False):
         """Updates per-camera hardware keys."""
-        self.load()
-
-        if cam_id is not None and cam_status:
-            cid = str(cam_id)
-            if cid in self.state["hardware"]["cams"]:
-                self.state["hardware"]["cams"][cid].update(cam_status)
-
-        if last_pic:
-            self.state["hardware"]["last_picture"] = datetime.now().strftime(Config.PRETTY_FORMAT)
-        
-        self.write()
+        def _apply(state):
+            if cam_id is not None and cam_status:
+                cid = str(cam_id)
+                cams = state.setdefault("hardware", {}).setdefault("cams", {})
+                if cid in cams:
+                    cams[cid].update(cam_status)
+            if last_pic:
+                state.setdefault("hardware", {})["last_picture"] = datetime.now().strftime(Config.PRETTY_FORMAT)
+        self._mutate_state(_apply)
 
     def update_lock_state(self, status="FREE", owner=None, details=None):
         """Updates lock info and records the exact time it was acquired."""
-        self.load()
-        
-        # Determine the acquisition time
-        acquired_time = None
-        if status == "LOCKED":
-            acquired_time = datetime.now().strftime(Config.PRETTY_FORMAT)
-        
-        self.state["hardware"]["lock_info"] = {
-            "status": status,
-            "owner": owner,
-            "details": details,
-            "acquired_at": acquired_time  # <-- Added to state
-        }
-        
-        # If lock is released, ensure all cameras are marked as IDLE
-        if status == "FREE":
-            for cam_id in self.state["hardware"]["cams"]:
-                self.state["hardware"]["cams"][cam_id]["activity"] = "IDLE"
-             
-        self.write()
+        def _apply(state):
+            acquired_time = None
+            if status == "LOCKED":
+                acquired_time = datetime.now().strftime(Config.PRETTY_FORMAT)
+            hardware = state.setdefault("hardware", {})
+            hardware["lock_info"] = {
+                "status": status,
+                "owner": owner,
+                "details": details,
+                "acquired_at": acquired_time,
+            }
+            if status == "FREE":
+                for cam_id in hardware.setdefault("cams", {}):
+                    hardware["cams"][cam_id]["activity"] = "IDLE"
+        self._mutate_state(_apply)
 
     def update_stream_status(self, status, camera_id=None, last_error=None):
         """Persist low-frequency live-preview lifecycle transitions."""
@@ -456,61 +488,53 @@ class SchedulerStatus(object):
         Syncs the internal scheduler object state to the dictionary
         WITHOUT overwriting the metadata stored in the jobs.
         """
-        if self.scheduler:
-            # 1. Update Running State
-            self.state["scheduler"]["running"] = self.scheduler.running
-            self.state["scheduler"]["last_update"] = datetime.now().strftime(Config.PRETTY_FORMAT)
+        if not self.scheduler:
+            return
 
-            # 2. Sync Jobs and find the absolute next execution
+        def _apply(state):
+            scheduler_block = state.setdefault("scheduler", {})
+            scheduler_block["running"] = self.scheduler.running
+            scheduler_block["last_update"] = datetime.now().strftime(Config.PRETTY_FORMAT)
+
             next_runtimes = []
             active_job_ids = []
-            
-            # Ensure "jobs" dict exists
-            if "jobs" not in self.state:
-                self.state["jobs"] = {}
-
-            cancelled = self.state.get("cancelled_experiments", [])
+            jobs = state.setdefault("jobs", {})
+            cancelled = state.get("cancelled_experiments", [])
 
             for job in self.scheduler.get_jobs():
                 active_job_ids.append(job.id)
 
                 if job.id in cancelled:
-                    if job.id in self.state["jobs"]:
-                        self.state["jobs"][job.id]['next_run_time'] = None
+                    if job.id in jobs:
+                        jobs[job.id]['next_run_time'] = None
                     continue
-                
-                # If job doesn't exist in state yet, create an empty dict to avoid KeyError
-                if job.id not in self.state["jobs"]:
-                    self.state["jobs"][job.id] = {}
-                    
-                # Update only the scheduling properties (preserves name, progress, etc.)
+
+                if job.id not in jobs:
+                    jobs[job.id] = {}
+
                 if job.next_run_time:
                     next_runtimes.append(job.next_run_time)
-                    self.state["jobs"][job.id]['next_run_time'] = job.next_run_time.strftime(Config.PRETTY_FORMAT)
-                    self.state["jobs"][job.id]['status'] = 'RUNNING'
+                    jobs[job.id]['next_run_time'] = job.next_run_time.strftime(Config.PRETTY_FORMAT)
+                    jobs[job.id]['status'] = 'RUNNING'
                 else:
-                    self.state["jobs"][job.id]['next_run_time'] = None
-                    # Only change to IDLE if it was RUNNING. This protects manual statuses like "ERROR".
-                    if self.state["jobs"][job.id].get('status') == 'RUNNING':
-                        self.state["jobs"][job.id]['status'] = 'IDLE'
-                        
-                self.state["jobs"][job.id]['trigger'] = str(job.trigger)
+                    jobs[job.id]['next_run_time'] = None
+                    if jobs[job.id].get('status') == 'RUNNING':
+                        jobs[job.id]['status'] = 'IDLE'
 
-            # Clean up: Mark jobs that disappeared from the APScheduler as IDLE
-            for jid in self.state["jobs"]:
+                jobs[job.id]['trigger'] = str(job.trigger)
+
+            for jid in jobs:
                 if jid not in active_job_ids:
-                    self.state["jobs"][jid]['next_run_time'] = None
-                    if self.state["jobs"][jid].get('status') == 'RUNNING':
-                        self.state["jobs"][jid]['status'] = 'IDLE'
+                    jobs[jid]['next_run_time'] = None
+                    if jobs[jid].get('status') == 'RUNNING':
+                        jobs[jid]['status'] = 'IDLE'
 
-            # 3. Handle the "Next Picture" Global Timestamp
             if next_runtimes:
-                earliest_job = min(next_runtimes)
-                self.state["scheduler"]["next_picture"] = earliest_job.strftime(Config.PRETTY_FORMAT)
+                scheduler_block["next_picture"] = min(next_runtimes).strftime(Config.PRETTY_FORMAT)
             else:
-                self.state["scheduler"]["next_picture"] = None
-            
-            self.write()
+                scheduler_block["next_picture"] = None
+
+        self._mutate_state(_apply)
 
     def remove_experiment(self, expid):
         """Removes an experiment and forces a full state refresh."""
@@ -566,25 +590,23 @@ class SchedulerStatus(object):
 
     def increment_job_progress(self, expid, last_status="SUCCESS"):
         """Called by the camera script to +1 the counter in RAM and dynamically update expectations."""
-        self.load()
         cid = str(expid)
-        if cid in self.state["jobs"]:
-            if "progress" not in self.state["jobs"][cid]:
-                self.state["jobs"][cid]["progress"] = {"taken": 0, "expected": 0, "expected_so_far": 0}
-                
-            # 1. Increment the actual taken counter
-            self.state["jobs"][cid]["progress"]["taken"] += 1
-            
-            # 2. Update the last capture timestamp
-            self.state["jobs"][cid]["last_capture"] = {
+
+        def _apply(state):
+            jobs = state.setdefault("jobs", {})
+            if cid not in jobs:
+                return
+            if "progress" not in jobs[cid]:
+                jobs[cid]["progress"] = {"taken": 0, "expected": 0, "expected_so_far": 0}
+
+            jobs[cid]["progress"]["taken"] += 1
+            jobs[cid]["last_capture"] = {
                 "time": datetime.now().strftime(Config.PRETTY_FORMAT),
                 "result": last_status
             }
-            
-            # --- NEW: Dynamically recalculate "Expected So Far" ---
-            start_str = self.state["jobs"][cid].get("start")
-            interval = self.state["jobs"][cid].get("interval")
-            
+
+            start_str = jobs[cid].get("start")
+            interval = jobs[cid].get("interval")
             if start_str and interval:
                 try:
                     start_dt = datetime.strptime(start_str, Config.PRETTY_FORMAT)
@@ -592,14 +614,13 @@ class SchedulerStatus(object):
                     if now >= start_dt:
                         elapsed_mins = (now - start_dt).total_seconds() / 60.0
                         expected_so_far = int(elapsed_mins // int(interval)) + 1
-                        
-                        # Cap it so it never exceeds the total expected lifespan of the experiment
-                        total_expected = self.state["jobs"][cid]["progress"].get("expected", expected_so_far)
-                        self.state["jobs"][cid]["progress"]["expected_so_far"] = min(expected_so_far, total_expected)
+                        total_expected = jobs[cid]["progress"].get("expected", expected_so_far)
+                        jobs[cid]["progress"]["expected_so_far"] = min(expected_so_far, total_expected)
                 except Exception as e:
-                    if self.log: self.log.error(f"Error calculating expected progress: {e}")
-                    
-        self.write()
+                    if self.log:
+                        self.log.error(f"Error calculating expected progress: {e}")
+
+        self._mutate_state(_apply)
 
     def update_diagnostic_result(self, result_status, message, detailed_results=None):
         """Called when a hardware scan finishes, storing a snapshot of all cameras."""
@@ -619,19 +640,23 @@ class SchedulerStatus(object):
     
     def update_lights_state(self, state_str):
         """Records whether the system believes the lights are currently ON or OFF based on our signal."""
-        self.load()
-        if "lights" not in self.state["hardware"]:
-            self.state["hardware"]["lights"] = {}
-        self.state["hardware"]["lights"]["state"] = state_str
-        self.write()
+        def _apply(state):
+            lights = state.setdefault("hardware", {}).setdefault("lights", {})
+            lights["state"] = state_str
+        self._mutate_state(_apply)
 
     def update_lights_status(self, health_data):
         """Records the mathematical results of a diagnostic light test."""
-        self.load()
-        if "lights" not in self.state["hardware"]:
-            self.state["hardware"]["lights"] = {"state": "OFF"}
-        self.state["hardware"]["lights"]["health_check"] = health_data
-        self.write()
+        def _apply(state):
+            lights = state.setdefault("hardware", {}).setdefault("lights", {"state": "OFF"})
+            lights["health_check"] = health_data
+        self._mutate_state(_apply)
+
+    def update_sync_fields(self, **fields):
+        """Patch rclone/sync keys without dumping a stale full snapshot."""
+        def _apply(state):
+            state.setdefault("sync", {}).update(fields)
+        self._mutate_state(_apply)
         
     # ------------------------------------------------------------------
     # UI FORMATTER
