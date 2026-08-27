@@ -538,18 +538,33 @@ class SchedulerStatus(object):
 
     def remove_experiment(self, expid):
         """Removes an experiment and forces a full state refresh."""
-        self.load()
-        if expid in self.state["jobs"]:
-            del self.state["jobs"][expid]
+        cid = str(expid)
+        removed = []
+
+        def _apply(state):
+            jobs = state.get("jobs", {})
+            if cid in jobs:
+                del jobs[cid]
+                removed.append(True)
+
+        if not self._mutate_state(_apply):
+            return
+        if removed:
             self.refresh_scheduler_status()
-            if self.log: 
+            if self.log:
                 self.log.info(f"Experiment {expid} removed. State synchronized.")
 
     def set_exp_status(self, expid, status):
-        self.load()
-        if expid in self.state["jobs"]:
-            self.state["jobs"][expid]['status'] = status
-            self.refresh_scheduler_status()
+        cid = str(expid)
+
+        def _apply(state):
+            jobs = state.get("jobs", {})
+            if cid in jobs:
+                jobs[cid]['status'] = status
+
+        if not self._mutate_state(_apply):
+            return
+        self.refresh_scheduler_status()
             
             
     # ------------------------------------------------------------------
