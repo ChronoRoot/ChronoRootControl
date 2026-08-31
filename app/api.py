@@ -23,7 +23,12 @@ from config import Config
 from app.experiment.models import Experiment
 from app.experimentlist.models import ExperimentList
 from app.options.schedulerstatus import SchedulerStatus
-from app.options.config_manager import save_user_config, apply_system_time_config, run_git_update
+from app.options.config_manager import (
+    save_user_config,
+    apply_system_time_config,
+    run_git_update,
+    persist_system_clock,
+)
 from app.sync.manager import setup_rclone_remote, test_rclone_connection
 from phototron.rpimodule import RpiModule
 from phototron.streamer import CameraStream
@@ -771,6 +776,7 @@ def reboot():
         500 Internal Server Error: {"error": "<exception details>"}
     """
     try:
+        persist_system_clock(force=True)
         os.system('(sleep 1; sudo shutdown -r now) &')
         return jsonify({'result': True, 'message': 'System is rebooting...'}), 200
     except Exception as e:
@@ -907,6 +913,7 @@ def restart_service():
     Returns:
         200 OK: "Restarting..." (Plaintext response to facilitate simple AJAX handling)
     """
+    persist_system_clock(force=True)
     subprocess.Popen('(sleep 1; sudo systemctl restart uwsgi) &', shell=True)
     return "Restarting..."
 

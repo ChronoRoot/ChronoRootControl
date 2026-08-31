@@ -5,12 +5,16 @@ import re
 import time
 import subprocess
 import socket
+import shutil
+import pwd
+import grp
 
 USER_CONFIG_PATH = '/srv/ChronoRootControl/user_config.py'
 REPO_DIR = '/srv/ChronoRootControl'
 GIT_TIMEOUT_SECONDS = 120
 TIMESYNCD_CLOCK_STAMP = '/var/lib/systemd/timesync/clock'
 ZONEINFO_DIR = '/usr/share/zoneinfo'
+STAMP_MAX_AGE_SECONDS = 15 * 60
 
 logger = logging.getLogger(__name__)
 
@@ -83,25 +87,37 @@ def _timezone_is_valid(name):
     return os.path.isfile(os.path.join(ZONEINFO_DIR, name))
 
 
-def persist_system_clock():
+def persist_system_clock(force=False):
     """
     Remember the current UTC instant for the next boot.
 
     Pi 3B+ has no RTC. Trixie persists time via the mtime of
-    /var/lib/systemd/timesync/clock; some images created that path as a
-    directory. fake-hwclock is optional (Bookworm images still ship it).
+    /var/lib/systemd/timesync/clock. Some images created that path as a
+    directory. Writes only when forced, missing, or older than 15 minutes.
     """
     stamp = TIMESYNCD_CLOCK_STAMP
+    parent = os.path.dirname(stamp)
     try:
-        subprocess.run(['sudo', 'mkdir', '-p', os.path.dirname(stamp)], check=False)
         if os.path.isdir(stamp) and not os.path.islink(stamp):
-            subprocess.run(['sudo', 'rm', '-rf', stamp], check=False)
-        subprocess.run(['sudo', 'touch', stamp], check=False)
-        subprocess.run(
-            ['sudo', 'chown', 'systemd-timesync:systemd-timesync', stamp],
-            check=False,
-        )
-        subprocess.run(['sudo', 'fake-hwclock', 'save'], check=False)
+            shutil.rmtree(stamp)
+            force = True
+        if not os.path.isfile(stamp):
+            os.makedirs(parent, exist_ok=True)
+            with open(stamp, 'a'):
+                pass
+            force = True
+        elif not force:
+            age = time.time() - os.path.getmtime(stamp)
+            if age < STAMP_MAX_AGE_SECONDS:
+                return
+
+        os.utime(stamp, None)
+
+        uid = pwd.getpwnam('systemd-timesync').pw_uid
+        gid = grp.getgrnam('systemd-timesync').gr_gid
+        st = os.stat(stamp)
+        if st.st_uid != uid or st.st_gid != gid:
+            os.chown(stamp, uid, gid)
     except Exception as e:
         logger.warning("Could not persist system clock: %s", e)
 
@@ -176,7 +192,7 @@ def apply_system_time_config(mode, date_str=None, timezone=None, ntp_server=None
             subprocess.run(['sudo', 'timedatectl', 'set-ntp', 'false'], check=True)
             subprocess.run(['sudo', 'date', '-s', date_str], check=True)
 
-        persist_system_clock()
+        persist_system_clock(force=True)
         return True, "Time configuration applied successfully."
 
     except subprocess.CalledProcessError as e:

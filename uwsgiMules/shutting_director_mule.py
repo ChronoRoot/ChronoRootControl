@@ -295,7 +295,8 @@ class HardwareWatchdog(threading.Thread):
         self.logger.info("Hardware Watchdog initialized.")
         while True:
             try:
-                persist_system_clock()
+                if not getattr(Config, 'USE_NTP', False):
+                    persist_system_clock()
                 scheduler_status.update_identity()
                 # A crashed uWSGI worker releases the kernel FileLock but cannot
                 # clear the shared JSON. Repair that stale metadata before alert
@@ -385,6 +386,7 @@ class HardwareWatchdog(threading.Thread):
             self.logger.error(f"Watchdog Failed to write log: {e}")
 
         self.logger.critical(f"WATCHDOG: Executing sudo reboot now. (Strike {recent_reboots + 1} of 3)")
+        persist_system_clock(force=True)
         subprocess.run(["sudo", "reboot"])
                
 # --- CHIEF OPERATOR ---
