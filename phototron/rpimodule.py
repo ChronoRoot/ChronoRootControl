@@ -12,6 +12,7 @@ Refactored: Feb 2026 by Nicolás Gaggion
 import logging
 import os
 import time
+import subprocess
 from datetime import datetime
 from config import Config
 from phototron.camera_selector import SelectorFactory
@@ -143,6 +144,14 @@ class RpiModule(object):
         return False
 
     @staticmethod
+    def _pause_rclone():
+        subprocess.run(["pkill", "-STOP", "-f", "rclone"], capture_output=True)
+
+    @staticmethod
+    def _resume_rclone():
+        subprocess.run(["pkill", "-CONT", "-f", "rclone"], capture_output=True)
+
+    @staticmethod
     def take_picture(xpid, status_manager):
         
         def report(cam_id=None, cam_status=None, last_pic=False):
@@ -176,7 +185,8 @@ class RpiModule(object):
                             rpi.exp_logger.info(f"Aborting capture for {xpid}: cancelled while waiting for lock.")
                             return False
 
-                        # 1. Lights ON
+                        # Freeze rclone so SD/network DMA does not starve Unicam during the still.
+                        RpiModule._pause_rclone()
                         if exp.ir:
                             rpi.light.state = Light.ON
                             status_manager.update_lights_state("ON")
@@ -254,7 +264,8 @@ class RpiModule(object):
                                 exp.save()
                             raise RuntimeError(msg)
 
-                    finally:  
+                    finally:
+                        RpiModule._resume_rclone()
                         rpi.light.state = Light.OFF
                         status_manager.update_lights_state("OFF")
                         status_manager.update_lock_state("FREE", None, None)

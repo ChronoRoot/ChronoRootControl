@@ -213,6 +213,8 @@ def run_rclone_sync():
             "rclone", "--config", RCLONE_CONF, "copy", source, destination,
             "--stats=1s", "--stats-one-line", "--stats-log-level", "NOTICE",
             "--no-update-dir-modtime",
+            "--transfers", "1",
+            "--checkers", "2",
         ]
         if remote_type == "sftp":
             combined_fd, combined_path = tempfile.mkstemp(prefix="rclone_combined_", suffix=".txt")
@@ -222,6 +224,8 @@ def run_rclone_sync():
         # Popen preexec_fn, which is unsafe in the mule's threaded context.
         if remote_type == "local":
             cmd = ["/bin/sh", "-c", 'umask 002; exec "$@"', "--"] + cmd
+        # Yield the SD/CPU bus to still captures (Unicam FIFO on Pi Zero 2 / Pi 3).
+        cmd = ["ionice", "-c", "3", "nice", "-n", "10"] + cmd
 
         # rclone emits a stats line every second (--stats=1s). Writing the RAM-disk
         # status file that often takes an exclusive fcntl lock + fsync each time, which

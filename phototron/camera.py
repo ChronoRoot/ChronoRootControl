@@ -119,11 +119,8 @@ class RaspiCamera(Camera):
                     self.hw_logger.error("Stream FATAL: 0 cameras detected.")
                     raise RuntimeError("0 cameras detected. Is dtoverlay=imx219 set in config.txt?")
                 
-            out_size = profile["resolution"]
             stream_size = profile["stream_resolution"]
             if getattr(Config, "CROP_TO_SQUARE", False):
-                side = min(out_size)
-                out_size = (side, side)
                 s = min(stream_size)
                 stream_size = (s, s)
 
@@ -138,7 +135,6 @@ class RaspiCamera(Camera):
                     "FrameDurationLimits": (frame_duration_us, frame_duration_us),
                 },
             )
-            config["sensor"]["output_size"] = out_size
             
             self.picam2.configure(config)
             self.picam2.start()
