@@ -48,6 +48,7 @@ For modules deployed in remote growth chambers, this tab allows you to automatic
 * **Live Status:** Shows what the background sync engine is doing. You can manually trigger a sync or cancel an active transfer at any time.
 * **Connection Type:** Supports sending data to another local hard drive, an SFTP/FTP server, or advanced Cloud Providers (like Google Drive or AWS).
 * **Server Credentials:** Enter your host IP, username, and password. You can use the **Test Connection** button to verify your credentials before saving.
+* **Group access:** Local copies are created group-writable (umask `002`). SSH/SFTP copies chmod only the files from that run so the lab group can read and write them; the whole 20–30 GB tree is not chmod’d. On the server, create the destination once as `chgrp labgroup /path && chmod 2775 /path`. FTP and cloud destinations are unchanged.
 * **Auto-Sync:** Toggle background syncing ON and set an interval (e.g., every 60 minutes). The system will quietly copy new pictures in the background without interrupting your ongoing experiments.
 
 ## 6. Wi-Fi & Networking
