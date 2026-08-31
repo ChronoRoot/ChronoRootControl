@@ -3,29 +3,12 @@ import os
 import time
 import logging
 import configparser
-import tempfile
-import shlex
 from datetime import datetime
 from config import Config
 from app.options.schedulerstatus import SchedulerStatus
 
 log = logging.getLogger(__name__)
 RCLONE_CONF = os.path.join(Config.APP_ROOT, 'rclone.conf')
-
-# Remote shell: chmod only paths piped on stdin (relative to dest). Not chmod -R.
-_SFTP_CHMOD_SCRIPT = r'''
-cd "$1" || exit 1
-while IFS= read -r p; do
-  [ -n "$p" ] || continue
-  chmod g+rwX -- "$p" || true
-  d=$(dirname -- "$p")
-  while [ "$d" != "." ] && [ "$d" != "/" ]; do
-    chmod g+rwXs -- "$d" 2>/dev/null || chmod g+rwX -- "$d" || true
-    d=$(dirname -- "$d")
-  done
-done
-'''
-
 
 def _get_obfuscated_password(remote_name="chronosync"):
     parser = configparser.ConfigParser()
@@ -73,112 +56,6 @@ def setup_rclone_remote(remote_type, host, user, password, port=None):
         return False, f"Configuration error: {str(e)}"
 
 
-def _reveal_password(obfuscated):
-    if not obfuscated:
-        return ""
-    try:
-        result = subprocess.run(
-            ["rclone", "reveal", obfuscated],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except Exception as e:
-        log.warning("Failed to reveal rclone password: %s", e)
-    return ""
-
-
-def _new_or_updated_paths(combined_path):
-    """Relative paths rclone created (+) or updated (*) this run."""
-    paths = []
-    seen = set()
-    try:
-        with open(combined_path, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                if line.startswith("+ ") or line.startswith("* "):
-                    rel = line[2:].strip().lstrip("/")
-                    if rel and rel not in seen:
-                        seen.add(rel)
-                        paths.append(rel)
-    except OSError as e:
-        log.warning("Could not read rclone combined log: %s", e)
-    return paths
-
-
-def _ssh_with_password(host, user, port, password, remote_cmd, stdin_text=None):
-    """Run one SSH command using the rclone SFTP password (SSH_ASKPASS)."""
-    askpass_path = None
-    try:
-        fd, askpass_path = tempfile.mkstemp(prefix="cr_askpass_", suffix=".sh")
-        os.write(fd, f"#!/bin/sh\nprintf '%s\\n' {shlex.quote(password or '')}\n".encode())
-        os.close(fd)
-        os.chmod(askpass_path, 0o700)
-
-        env = os.environ.copy()
-        env["SSH_ASKPASS"] = askpass_path
-        env["SSH_ASKPASS_REQUIRE"] = "force"
-        env.setdefault("DISPLAY", ":0")
-
-        ssh_cmd = [
-            "ssh",
-            "-oBatchMode=no",
-            "-oStrictHostKeyChecking=accept-new",
-            "-oConnectTimeout=15",
-            "-oPreferredAuthentications=password",
-            "-oPubkeyAuthentication=no",
-        ]
-        if port:
-            ssh_cmd.extend(["-p", str(port)])
-        ssh_cmd.append(f"{user}@{host}")
-        ssh_cmd.append(remote_cmd)
-
-        result = subprocess.run(
-            ssh_cmd,
-            input=stdin_text,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            start_new_session=True,
-        )
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout or "ssh failed").strip()
-            return err.split("\n")[-1][:300]
-        return None
-    except Exception as e:
-        return str(e)
-    finally:
-        if askpass_path:
-            try:
-                os.unlink(askpass_path)
-            except OSError:
-                pass
-
-def _chmod_sftp_new_files(dest_path, combined_path):
-    """Group-writable on files this SFTP copy wrote. Does not walk the whole tree."""
-    paths = _new_or_updated_paths(combined_path)
-    if not paths:
-        return None
-
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(RCLONE_CONF)
-    cfg = dict(parser["chronosync"]) if "chronosync" in parser.sections() else {}
-    
-    host, user = cfg.get("host"), cfg.get("user")
-    password = _reveal_password(cfg.get("pass", ""))
-    if not host or not user or not password:
-        return "SFTP credentials missing for group chmod"
-
-    # Script is -c (uses $1 = dest). Path list is stdin so we do not chmod -R.
-    remote_cmd = (
-        f"sh -c {shlex.quote(_SFTP_CHMOD_SCRIPT)} "
-        f"sh {shlex.quote(dest_path)}"
-    )
-    return _ssh_with_password(
-        host, user, cfg.get("port"), password, remote_cmd, "\n".join(paths) + "\n"
-    )
-
-
 def run_rclone_sync():
     """
     Executes the sync operation. This blocks the calling thread, 
@@ -207,19 +84,14 @@ def run_rclone_sync():
         status_msg="Calculating transfer size...",
     )
 
-    combined_path = None
     try:
         cmd = [
             "rclone", "--config", RCLONE_CONF, "copy", source, destination,
             "--stats=1s", "--stats-one-line", "--stats-log-level", "NOTICE",
-            "--no-update-dir-modtime",
+            "--no-update-modtime",
             "--transfers", "1",
             "--checkers", "2",
         ]
-        if remote_type == "sftp":
-            combined_fd, combined_path = tempfile.mkstemp(prefix="rclone_combined_", suffix=".txt")
-            os.close(combined_fd)
-            cmd.extend(["--combined", combined_path])
         # Local: umask 002 so new files are 664 / dirs 775. sh wrapper avoids
         # Popen preexec_fn, which is unsafe in the mule's threaded context.
         if remote_type == "local":
@@ -274,12 +146,6 @@ def run_rclone_sync():
         process.wait()
         
         if process.returncode == 0:
-            if remote_type == "sftp" and combined_path:
-                status.update_sync_fields(status_msg="Applying group permissions...")
-                perm_warning = _chmod_sftp_new_files(custom_path, combined_path)
-                if perm_warning:
-                    log.warning("Copy succeeded but group permissions were not fully applied: %s", perm_warning)
-
             status.update_sync_fields(
                 is_syncing=False,
                 status_msg="Standby",
@@ -307,12 +173,6 @@ def run_rclone_sync():
             last_error=f"Catastrophic failure: {e}",
         )
         return False, "Transfer failed."
-    finally:
-        if combined_path:
-            try:
-                os.unlink(combined_path)
-            except OSError:
-                pass
 
 def test_rclone_connection(remote_type, host, user, password, port=None):
     try:
