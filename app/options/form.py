@@ -10,29 +10,50 @@ from wtforms import (BooleanField, SelectField, StringField, SelectMultipleField
                      IntegerField, FloatField)
 from wtforms.fields import DateTimeField
 from wtforms.validators import Optional, DataRequired, Length, Regexp
-from wtforms import widgets 
+from wtforms import widgets
+
+
+def _timezone_choices():
+    """IANA zones for the config-page select; skip the sentinel 'localtime'."""
+    zones = []
+    try:
+        from zoneinfo import available_timezones
+        zones = sorted(z for z in available_timezones() if z != 'localtime')
+    except Exception:
+        try:
+            import pytz
+            zones = list(pytz.common_timezones)
+        except Exception:
+            zones = ['UTC']
+    if 'UTC' not in zones:
+        zones.insert(0, 'UTC')
+    return [(z, z) for z in zones]
+
 
 class AppSettingsForm(Form):
     """
     Settings of the application Time and Config
     """
     sync_mode = BooleanField("Use Network Time", default=True)
-    
-    # Add your preferred time zones here
-    time_zone = SelectField("Time Zone", choices=[
-        ('UTC', 'UTC'),
-        ('Europe/London', 'Europe/London'),
-        ('Europe/Paris', 'Europe/Paris'),
-        ('America/New_York', 'America/New_York'),
-        ('America/Chicago', 'America/Chicago'),
-        ('Asia/Tokyo', 'Asia/Tokyo'),
-        ('Australia/Sydney', 'Australia/Sydney')
-    ], default="UTC")
-    
+
+    time_zone = SelectField("Time Zone", choices=[], default="UTC")
+
     ntp_server = StringField("NTP Server", default="pool.ntp.org")
-    
+
     systemDate = DateTimeField("Manual Date", format='%Y-%m-%d %H:%M:%S',
                         default=datetime.datetime.now, validators=[Optional()])
+
+    def __init__(self, *args, **kwargs):
+        super(AppSettingsForm, self).__init__(*args, **kwargs)
+        choices = _timezone_choices()
+        try:
+            from config import Config
+            current = getattr(Config, 'TIME_ZONE', None)
+            if current and (current, current) not in choices:
+                choices = [(current, current)] + choices
+        except Exception:
+            pass
+        self.time_zone.choices = choices
     
 class BackLightForm(Form):
     """

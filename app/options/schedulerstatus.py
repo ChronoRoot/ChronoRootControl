@@ -14,6 +14,15 @@ import time
 from filelock import FileLock, Timeout
 from app.storage.stats import get_storage_stats
 
+
+def _as_local_naive(dt):
+    """APScheduler next_run_time is tz-aware; UI compares naive local strings."""
+    if dt is None:
+        return None
+    if getattr(dt, 'tzinfo', None) is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+    return dt
+
 class SchedulerStatus(object):
     # Shared configuration
     status_file = "/run/chronoroot_scheduler_status.json"
@@ -513,8 +522,9 @@ class SchedulerStatus(object):
                     jobs[job.id] = {}
 
                 if job.next_run_time:
-                    next_runtimes.append(job.next_run_time)
-                    jobs[job.id]['next_run_time'] = job.next_run_time.strftime(Config.PRETTY_FORMAT)
+                    local_nrt = _as_local_naive(job.next_run_time)
+                    next_runtimes.append(local_nrt)
+                    jobs[job.id]['next_run_time'] = local_nrt.strftime(Config.PRETTY_FORMAT)
                     jobs[job.id]['status'] = 'RUNNING'
                 else:
                     jobs[job.id]['next_run_time'] = None

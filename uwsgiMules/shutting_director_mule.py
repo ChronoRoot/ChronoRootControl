@@ -29,7 +29,11 @@ from app.experimentlist.models import ExperimentList
 from app.options.schedulerstatus import SchedulerStatus
 from app.sync.manager import run_rclone_sync
 import subprocess
-from app.options.config_manager import save_user_config
+from app.options.config_manager import (
+    save_user_config,
+    persist_system_clock,
+    restore_system_clock_if_needed,
+)
 
 logging.basicConfig(filename=Config.SHDL_LOG_FILE,
                     level=Config.LOG_LEVEL,
@@ -41,6 +45,7 @@ try:
     scheduler
 except NameError:
     scheduler = BackgroundScheduler(
+        timezone=getattr(Config, 'TIME_ZONE', 'UTC'),
         executors={'default': ThreadPoolExecutor(2)},
         job_defaults={'misfire_grace_time': 15},
     )
@@ -289,7 +294,8 @@ class HardwareWatchdog(threading.Thread):
     def run(self):
         self.logger.info("Hardware Watchdog initialized.")
         while True:
-            try:                
+            try:
+                persist_system_clock()
                 scheduler_status.update_identity()
                 # A crashed uWSGI worker releases the kernel FileLock but cannot
                 # clear the shared JSON. Repair that stale metadata before alert
@@ -393,11 +399,14 @@ class ChiefOperator(object):
 
         while True:
             try:
-                # During startup, we wait for the OS time to be accurate before resyncing the scheduler with disk.
-                
+                # Raise the kernel clock to the last saved stamp before any
+                # job math. Manual mode disables timesyncd, so it will not
+                # restore /var/lib/systemd/timesync/clock on its own.
+                restore_system_clock_if_needed()
+
                 if getattr(Config, 'USE_NTP', False):
-                    # Loop up to 10 times (10 seconds max on a cold boot)
-                    for i in range(10):
+                    # Loop up to 30 times (30 seconds max on a cold boot)
+                    for i in range(30):
                         try:
                             # Ask systemd if the clock is officially synced
                             result = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized"], capture_output=True, text=True)
@@ -409,8 +418,8 @@ class ChiefOperator(object):
                         except Exception as e:
                             pass
                             
-                        cop.logger.warning(f"Waiting for OS time sync to finish... ({i+1}/10)")
-                        time.sleep(1)                
+                        cop.logger.warning(f"Waiting for OS time sync to finish... ({i+1}/30)")
+                        time.sleep(1)
                 
                 cop.resync_with_disk()
                 
