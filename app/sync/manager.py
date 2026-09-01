@@ -78,17 +78,24 @@ def run_rclone_sync():
     destination = custom_path if remote_type == 'local' else f"chronosync:{custom_path}"
 
     # Initialize RAM-disk file state
+    started_at = datetime.now().strftime(Config.PRETTY_FORMAT)
     status.update_sync_fields(
         is_syncing=True,
-        last_start=datetime.now().strftime(Config.PRETTY_FORMAT),
+        last_start=started_at,
         status_msg="Calculating transfer size...",
     )
+
+    def _finish_this_run(**fields):
+        current = status.get_info().get("sync", {}).get("last_start")
+        if current == started_at:
+            status.update_sync_fields(**fields)
 
     try:
         cmd = [
             "rclone", "--config", RCLONE_CONF, "copy", source, destination,
             "--stats=1s", "--stats-one-line", "--stats-log-level", "NOTICE",
             "--no-update-modtime",
+            "--timeout", "5m",
             "--transfers", "1",
             "--checkers", "2",
         ]
@@ -146,7 +153,7 @@ def run_rclone_sync():
         process.wait()
         
         if process.returncode == 0:
-            status.update_sync_fields(
+            _finish_this_run(
                 is_syncing=False,
                 status_msg="Standby",
                 last_success=datetime.now().strftime(Config.PRETTY_FORMAT),
@@ -157,8 +164,7 @@ def run_rclone_sync():
             error_details = " | ".join(last_log_lines)
             if not error_details: error_details = "Unknown Error"
             log.error(f"Rclone failed with code {process.returncode}. Details: {error_details}")
-            
-            status.update_sync_fields(
+            _finish_this_run(
                 is_syncing=False,
                 status_msg="Standby",
                 last_error=error_details,
@@ -167,7 +173,7 @@ def run_rclone_sync():
             
     except Exception as e:
         log.error(f"Rclone failed catastrophically: {e}")
-        status.update_sync_fields(
+        _finish_this_run(
             is_syncing=False,
             status_msg="Standby",
             last_error=f"Catastrophic failure: {e}",

@@ -75,7 +75,7 @@ Because ChronoRoot modules are often deployed in the field or in isolated growth
 * **Protocol Support:** Natively supports SFTP and FTP, with a configuration wrapper that safely encrypts and obfuscates passwords within rclone.conf. It also supports "Advanced" cloud providers (Google Drive, AWS S3) requiring terminal-based OAuth setup.
 * **Group-writable copies:** Local copies use umask `002` (new files `664`, dirs `775`). Debian rclone 1.60 has no `--no-update-dir-modtime` / `--combined`, so SSH/SFTP copies do not chmod after upload; prepare the lab folder once as a shared-group `2775` directory. `--no-update-modtime` is used so identical files are not touched. FTP and cloud remotes are copy-only.
 * **Shared-group server setup:** Create the destination once as `chgrp labgroup /path && chmod 2775 /path`. The Pi does not chown. New files then inherit that group; group write lets other modules in the same group update the same files.
-* **Non-Blocking Feedback:** Users can trigger manual syncs, cancel active transfers via IPC signals, and view connection test results without freezing the web interface.
+* **Non-Blocking Feedback:** Users can trigger manual syncs, cancel active transfers via IPC signals, and view connection test results without freezing the web interface. Cancel unpauses then kills rclone and only clears `is_syncing` after the process is gone; a copy with no bytes for 5 minutes fails the same way.
 
 ### Network & Wi-Fi Operations
 

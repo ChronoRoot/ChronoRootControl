@@ -547,6 +547,7 @@ The pulled code takes effect only after the services restart or the Pi reboots. 
 | GET | `/api/config` | Read module configuration. |
 | PUT | `/api/config` | Update configuration. |
 | POST | `/api/sync/trigger` | Manual rclone sync. |
+| POST | `/api/sync/cancel` | Unpause then kill rclone; `is_syncing` clears only after the process is gone. A copy with no bytes for 5 minutes fails the same way. Also disables auto-sync. |
 | POST | `/api/update` | Safely pull code or explicitly force remote state; restart/reboot to apply. |
 | POST | `/api/reboot` | Reboot module (use with care). |
 

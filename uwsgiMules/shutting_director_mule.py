@@ -490,13 +490,32 @@ class ChiefOperator(object):
                 sync_thread.start()
             elif action == 'CANCEL_SYNC':
                 self.logger.warning("Emergency Kill Signal received! Terminating rclone...")
-                # 1. Brute-force kill the network subprocess
-                subprocess.Popen(['pkill', '-9', '-f', 'rclone'])
-                # 2. Disable Auto-Sync in live memory so the Daemon stops immediately
-                Config.SYNC_ENABLED = False
-                # 3. Save to disk so it survives a reboot
-                save_user_config({'SYNC_ENABLED': False})
-                self.logger.info("Auto-sync automatically disabled due to kill switch.")
+                # Unpause first: take_picture may have SIGSTOP'd rclone.
+                subprocess.run(['pkill', '-CONT', '-f', 'rclone'], capture_output=True)
+                subprocess.run(['pkill', '-9', '-f', 'rclone'], capture_output=True)
+                rclone_gone = False
+                for _ in range(10):
+                    check = subprocess.run(['pgrep', '-f', 'rclone'], capture_output=True)
+                    if check.returncode != 0:
+                        rclone_gone = True
+                        break
+                    time.sleep(0.5)
+                if not rclone_gone:
+                    self.logger.warning(
+                        "rclone still running after kill (may be paused/uninterruptible)"
+                    )
+                    scheduler_status.update_sync_fields(
+                        last_error="rclone still running after kill",
+                    )
+                else:
+                    scheduler_status.update_sync_fields(
+                        is_syncing=False,
+                        status_msg="Standby",
+                        last_error="Cancelled",
+                    )
+                    Config.SYNC_ENABLED = False
+                    save_user_config({'SYNC_ENABLED': False})
+                    self.logger.info("Auto-sync automatically disabled due to kill switch.")
             else:
                 self.logger.warning(f"Unknown action: {action}")
         except Exception as e:
