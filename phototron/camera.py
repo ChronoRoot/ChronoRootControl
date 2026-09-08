@@ -119,8 +119,11 @@ class RaspiCamera(Camera):
                     self.hw_logger.error("Stream FATAL: 0 cameras detected.")
                     raise RuntimeError("0 cameras detected. Is dtoverlay=imx219 set in config.txt?")
                 
+            out_size = profile["resolution"]
             stream_size = profile["stream_resolution"]
             if getattr(Config, "CROP_TO_SQUARE", False):
+                side = min(out_size)
+                out_size = (side, side)
                 s = min(stream_size)
                 stream_size = (s, s)
 
@@ -128,6 +131,7 @@ class RaspiCamera(Camera):
             frame_duration_us = int(1000000 / preview_fps)
             config = self.picam2.create_preview_configuration(
                 main={"format": "RGB888", "size": stream_size},
+                sensor={"output_size": out_size},
                 # Do not hand capture_array() a previously completed request:
                 # every delivered image must come from a fresh camera frame.
                 queue=False,
@@ -139,7 +143,9 @@ class RaspiCamera(Camera):
             self.picam2.configure(config)
             self.picam2.start()
             self.hw_logger.info(
-                "Stream: fixed preview rate %s FPS (%sus frame duration), queue disabled.",
+                "Stream: sensor %s, stream %s, fixed preview rate %s FPS (%sus frame duration), queue disabled.",
+                out_size,
+                stream_size,
                 preview_fps,
                 frame_duration_us,
             )
