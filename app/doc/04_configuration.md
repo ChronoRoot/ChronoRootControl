@@ -65,13 +65,15 @@ Noteworthy configuration variables are
 
 ## Camera capture profiles
 
-Since the migration to Picamera2 (libcamera), camera tuning is driven by named profiles in `CAM_CAPTURE_PROFILES`, not by the legacy `CAM_PARAMS` ISP keys. Each profile bundles a set of libcamera controls that are applied via `set_controls()` right before each capture, plus a `grayscale` flag controlling whether the saved PNG is converted to monochrome.
+Since the migration to Picamera2 (libcamera), camera tuning is driven by named profiles in `CAM_CAPTURE_PROFILES`, not by the legacy `CAM_PARAMS` ISP keys. Each profile bundles a set of libcamera controls that are applied via `set_controls()` right before each capture, plus a `grayscale` flag controlling whether the saved PNG is converted to monochrome. `NoiseReductionMode` from the active profile is also passed into the still/preview configuration so still capture does not start in HighQuality denoise.
+
+The existing `CAMERA_PROFILES` table (V2, V3 V2-compat, V3, V3 Wide) now includes a `tuning_file` (`imx219.json`, `imx708.json`, or `imx708_wide.json`). IR backlight profiles load that file and disable adaptive contrast (`ce_enable`). `color_auto` still opens Picamera2 with libcamera’s default tuning.
 
 Three profiles ship by default:
 
 * `backlight_manual` (the default, selected by `DEFAULT_CAPTURE_PROFILE`): for modules fitted with a high-pass infrared filter. The camera only sees the IR backlight, so auto exposure, auto white balance, and noise reduction are disabled and exposure/gain are locked. This preserves the contrast and sharp root edges that the auto algorithms otherwise destroy. Tune `ExposureTime` (microseconds) and `AnalogueGain` for your chamber.
 
-* `backlight_auto`: also for the IR filter, but lets auto exposure and auto white balance run while keeping noise reduction off so fine root edges are preserved. The output is still converted to grayscale.
+* `backlight_auto`: also for the IR filter. Auto exposure runs (the closest Picamera2 stand-in for the old Picamera1 backlight exposure mode), but auto white balance stays off with neutral `ColourGains` `(1.0, 1.0)` and `Saturation` 0 so Bayesian AWB cannot crush the IR-carrying red channel or boost noisy blue. Noise reduction is off at configure time, and adaptive contrast enhancement is disabled in the sensor tuning file, so fine root edges are preserved. The output is still converted to grayscale. Devices that already saved a camera profile must re-save the **Camera Capture Profile** card so `user_config.py` picks up this definition.
 
 * `color_auto`: for when the IR filter is physically removed and you want normal color imaging. Auto exposure and auto white balance run normally with standard noise reduction.
 

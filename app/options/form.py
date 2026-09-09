@@ -99,7 +99,7 @@ class CameraProfileForm(Form):
     """
     default_profile = SelectField('Active Capture Profile', choices=[
         ('backlight_manual', 'Backlight Manual (locked exposure, grayscale)'),
-        ('backlight_auto', 'Backlight Auto (auto exposure/WB, no denoise, grayscale)'),
+        ('backlight_auto', 'Backlight Auto (IR-neutral WB, auto exposure, no denoise)'),
         ('color_auto', 'Color Auto (auto exposure/WB, denoised, color)'),
     ])
     exposure_time = IntegerField('Manual Exposure Time (us)', validators=[Optional()])

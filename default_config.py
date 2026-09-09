@@ -43,25 +43,29 @@ class Config(object):
             "name": "Raspberry Pi Camera Module V2",
             "resolution": (3280, 2464),       # Native 4:3 max resolution
             "stream_resolution": (800, 600),  # 4:3 streaming
-            "autofocus": False
+            "autofocus": False,
+            "tuning_file": "imx219.json",
         },
         "RPICAM_V3_V2COMP": {
             "name": "Raspberry Pi Camera Module V3 (V2 compatible mode)",
             "resolution": (3280, 2464),       
             "stream_resolution": (800, 600),  
-            "autofocus": True
+            "autofocus": True,
+            "tuning_file": "imx708.json",
         },
         "RPICAM_V3": {
             "name": "Raspberry Pi Camera Module V3",
             "resolution": (4608, 2592),       # Native 16:9 max resolution
             "stream_resolution": (800, 450),  # 16:9 streaming (prevents squishing)
-            "autofocus": True
+            "autofocus": True,
+            "tuning_file": "imx708.json",
         },
         "RPICAM_V3_WIDE": {
             "name": "Raspberry Pi Camera Module V3 Wide",
             "resolution": (4608, 2592),
             "stream_resolution": (800, 450),
-            "autofocus": True
+            "autofocus": True,
+            "tuning_file": "imx708_wide.json",
         }
     }
     
@@ -150,14 +154,20 @@ class Config(object):
                 "AnalogueGain": 1.0,
             },
         },
-        # IR backlight, automatic: let AE/AWB run but keep denoise off so fine
-        # root edges are preserved. Output is still converted to grayscale.
+        # IR backlight, automatic: auto exposure like Picamera1 backlight mode,
+        # but Bayesian AWB stays off. Neutral ColourGains keep the IR-carrying
+        # channels (do not boost noisy blue). Denoise off so root edges survive.
         "backlight_auto": {
             "grayscale": True,
             "controls": {
                 "AeEnable": True,
-                "AwbEnable": True,
-                "NoiseReductionMode": 0,    # off, preserve sharp root edges
+                "AwbEnable": False,
+                "ColourGains": (1.0, 1.0),
+                "Saturation": 0.0,
+                "NoiseReductionMode": 0,    # Off; still configs default to HighQuality
+                "AeConstraintMode": 1,      # Highlight: closest AE analog to backlit plates
+                "Contrast": 1.0,
+                "Sharpness": 1.0,
             },
         },
         # Visible light (IR filter physically removed): let libcamera run normally.

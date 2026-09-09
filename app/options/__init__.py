@@ -271,8 +271,13 @@ def conf():
                 'grayscale': True,
                 'controls': {
                     'AeEnable': True,
-                    'AwbEnable': True,
+                    'AwbEnable': False,
+                    'ColourGains': (1.0, 1.0),
+                    'Saturation': 0.0,
                     'NoiseReductionMode': 0,
+                    'AeConstraintMode': 1,
+                    'Contrast': 1.0,
+                    'Sharpness': 1.0,
                 },
             },
             'color_auto': {

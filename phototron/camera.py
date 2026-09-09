@@ -110,11 +110,30 @@ class RaspiCamera(Camera):
 
     def stream_frames(self, cam_id=None): 
         profile = Config.CAMERA_PROFILES[Config.CAMERA_TYPE]
+        capture_name = self._resolve_capture_profile({})
         try:
             self.hw_logger.info("Stream: Initializing preview pipeline...")
             if not self.picam2:
                 try:
-                    self.picam2 = Picamera2()
+                    tuning_file = profile.get("tuning_file")
+                    if capture_name in ("backlight_manual", "backlight_auto") and tuning_file:
+                        try:
+                            tuning = Picamera2.load_tuning_file(tuning_file)
+                            contrast = Picamera2.find_tuning_algo(tuning, "rpi.contrast")
+                            if contrast is not None:
+                                contrast["ce_enable"] = 0
+                            self.picam2 = Picamera2(tuning=tuning)
+                        except IndexError:
+                            raise
+                        except Exception as e:
+                            self.hw_logger.warning(
+                                "Camera: could not apply IR-safe tuning from '%s' (%s). Opening without patch.",
+                                tuning_file,
+                                e,
+                            )
+                            self.picam2 = Picamera2()
+                    else:
+                        self.picam2 = Picamera2()
                 except IndexError:
                     self.hw_logger.error("Stream FATAL: 0 cameras detected.")
                     raise RuntimeError("0 cameras detected. Is dtoverlay=imx219 set in config.txt?")
@@ -129,15 +148,19 @@ class RaspiCamera(Camera):
 
             preview_fps = max(1, int(getattr(Config, "PREVIEW_FPS", 10)))
             frame_duration_us = int(1000000 / preview_fps)
+            preview_controls = {
+                "FrameDurationLimits": (frame_duration_us, frame_duration_us),
+            }
+            nr = Config.CAM_CAPTURE_PROFILES[capture_name].get("controls", {}).get("NoiseReductionMode")
+            if nr is not None:
+                preview_controls["NoiseReductionMode"] = nr
             config = self.picam2.create_preview_configuration(
                 main={"format": "RGB888", "size": stream_size},
                 sensor={"output_size": out_size},
                 # Do not hand capture_array() a previously completed request:
                 # every delivered image must come from a fresh camera frame.
                 queue=False,
-                controls={
-                    "FrameDurationLimits": (frame_duration_us, frame_duration_us),
-                },
+                controls=preview_controls,
             )
             
             self.picam2.configure(config)
@@ -291,14 +314,40 @@ class RaspiCamera(Camera):
         while retries <= Config.CAM_RETRIES:
             retries += 1
             try:
+                capture_name = self._resolve_capture_profile(params)
                 if not self.picam2:
-                    self.picam2 = Picamera2()
+                    tuning_file = profile.get("tuning_file")
+                    if capture_name in ("backlight_manual", "backlight_auto") and tuning_file:
+                        try:
+                            tuning = Picamera2.load_tuning_file(tuning_file)
+                            contrast = Picamera2.find_tuning_algo(tuning, "rpi.contrast")
+                            if contrast is not None:
+                                contrast["ce_enable"] = 0
+                            self.picam2 = Picamera2(tuning=tuning)
+                        except IndexError:
+                            raise
+                        except Exception as e:
+                            self.hw_logger.warning(
+                                "Camera: could not apply IR-safe tuning from '%s' (%s). Opening without patch.",
+                                tuning_file,
+                                e,
+                            )
+                            self.picam2 = Picamera2()
+                    else:
+                        self.picam2 = Picamera2()
 
                 res = profile["resolution"]
                 if getattr(Config, "CROP_TO_SQUARE", False):
                     side = min(res)
                     res = (side, side)
-                config = self.picam2.create_still_configuration(main={"size": res})
+                still_controls = {}
+                nr = Config.CAM_CAPTURE_PROFILES[capture_name].get("controls", {}).get("NoiseReductionMode")
+                if nr is not None:
+                    still_controls["NoiseReductionMode"] = nr
+                config = self.picam2.create_still_configuration(
+                    main={"size": res},
+                    controls=still_controls,
+                )
                 self.picam2.configure(config)
                 self.picam2.start()
                 
