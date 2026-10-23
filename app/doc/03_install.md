@@ -175,6 +175,26 @@ The Wi-Fi settings are now handled inside the ChronoRoot application.
 * **In the Field:** The Wi-Fi tab will show the Comitup network selector inside an iframe, allowing you to bridge the module to a local router.
 * **In the Lab:** The Wi-Fi tab will show your current connection status and provide a **"Forget Network"** button to force the module back into Hotspot mode for reconfiguration.
 
+### D. Wi-Fi Stability Fix (Disable Power Save & Roaming)
+
+The onboard Broadcom Wi-Fi chip (`brcmfmac`) on the Raspberry Pi 3B and Zero 2 W enables aggressive power management by default. In multi-module setups (20+ Pis on a single access point), this causes modules to periodically stop responding to `ping` and API `curl` requests while remaining associated to the router.
+
+Run the following block to permanently disable Wi-Fi power saving in NetworkManager and prevent background roaming scans:
+
+```bash
+# 1. Permanently disable Wi-Fi power saving in NetworkManager
+cat << 'EOF' | sudo tee /etc/NetworkManager/conf.d/10-disable-wifi-powersave.conf > /dev/null
+[connection]
+wifi.powersave = 2
+EOF
+
+# 2. Disable firmware roaming scans on the Broadcom Wi-Fi driver
+echo "options brcmfmac roamoff=1" | sudo tee /etc/modprobe.d/brcmfmac.conf > /dev/null
+
+# 3. Apply immediately
+sudo systemctl reload NetworkManager
+sudo iw dev wlan0 set power_save off
+
 ## 5. Directory Structure & Permissions
 
 ChronoRoot requires specific directories for data logging and application files.

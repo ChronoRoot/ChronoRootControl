@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import os
 import json
 import socket
+import struct
 import uuid
 from config import Config
 import fcntl
@@ -191,25 +192,52 @@ class SchedulerStatus(object):
             self.write()
 
     def _fetch_system_identity(self):
-        """Fetches and updates the hostname, IP address, and MAC address."""
-        # 1. Hostname
+        """Fetches and updates the hostname, IP address, and MAC address.
+
+        Never publishes 127.0.0.1. If the route lookup fails, try wlan0/eth0,
+        then keep the previous LAN address.
+        """
         hostname = socket.gethostname()
-        
-        # 2. MAC Address (Formats the raw integer into XX:XX:XX:XX:XX:XX)
+
         mac_num = uuid.getnode()
         mac = ':'.join(('%012X' % mac_num)[i:i+2] for i in range(0, 12, 2))
-        
-        # 3. IP Address (Connects a dummy UDP socket to find the active routing IP)
-        ip = "127.0.0.1"
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-        except Exception:
-            pass # Fallback remains 127.0.0.1 if completely offline
 
-        # Update state directly
+        ip = None
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+        except OSError:
+            ip = None
+        finally:
+            sock.close()
+
+        if not ip or ip.startswith("127.") or ip.startswith("169.254.") or ip == "0.0.0.0":
+            ip = None
+            for iface in ("wlan0", "eth0", "usb0"):
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                try:
+                    packed = fcntl.ioctl(
+                        sock.fileno(),
+                        0x8915,  # SIOCGIFADDR
+                        struct.pack("256s", iface[:15].encode("utf-8")),
+                    )
+                    found = socket.inet_ntoa(packed[20:24])
+                except OSError:
+                    found = None
+                finally:
+                    sock.close()
+                if found and not found.startswith("127."):
+                    ip = found
+                    break
+
+        if not ip or ip.startswith("127.") or ip == "0.0.0.0":
+            previous = (self.state.get("identity") or {}).get("ip")
+            if previous and not str(previous).startswith("127.") and previous not in ("0.0.0.0", "UNKNOWN"):
+                ip = previous
+            else:
+                ip = "UNKNOWN"
+
         self.state["identity"] = {
             "hostname": hostname,
             "ip": ip,
