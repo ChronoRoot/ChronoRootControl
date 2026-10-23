@@ -74,7 +74,7 @@ class Config(object):
     
     # --- TIME & NETWORK DEFAULTS ---
     USE_NTP = False
-    TIME_ZONE = "Europe/Paris"
+    TIME_ZONE = "UTC+00:00"
     NTP_SERVER = "pool.ntp.org"
 
     # Unified Date Format

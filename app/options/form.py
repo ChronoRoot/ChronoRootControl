@@ -13,21 +13,14 @@ from wtforms.validators import Optional, DataRequired, Length, Regexp
 from wtforms import widgets
 
 
-def _timezone_choices():
-    """IANA zones for the config-page select; skip the sentinel 'localtime'."""
-    zones = []
-    try:
-        from zoneinfo import available_timezones
-        zones = sorted(z for z in available_timezones() if z != 'localtime')
-    except Exception:
-        try:
-            import pytz
-            zones = list(pytz.common_timezones)
-        except Exception:
-            zones = ['UTC']
-    if 'UTC' not in zones:
-        zones.insert(0, 'UTC')
-    return [(z, z) for z in zones]
+def _timezone_choices(current=None):
+    """UTC-12:00 through UTC+14:00. A saved city zone stays selectable."""
+    from app.options.fixed_offsets import display_zone, utc_offset_choices
+    choices = utc_offset_choices()
+    shown = display_zone(current) if current else None
+    if shown and shown not in [value for value, _label in choices]:
+        choices = [(shown, "%s (current)" % shown)] + choices
+    return choices
 
 
 class AppSettingsForm(Form):
@@ -36,7 +29,7 @@ class AppSettingsForm(Form):
     """
     sync_mode = BooleanField("Use Network Time", default=True)
 
-    time_zone = SelectField("Time Zone", choices=[], default="UTC")
+    time_zone = SelectField("UTC offset", choices=[], default="UTC+00:00")
 
     ntp_server = StringField("NTP Server", default="pool.ntp.org")
 
@@ -45,15 +38,13 @@ class AppSettingsForm(Form):
 
     def __init__(self, *args, **kwargs):
         super(AppSettingsForm, self).__init__(*args, **kwargs)
-        choices = _timezone_choices()
+        current = None
         try:
             from config import Config
             current = getattr(Config, 'TIME_ZONE', None)
-            if current and (current, current) not in choices:
-                choices = [(current, current)] + choices
         except Exception:
             pass
-        self.time_zone.choices = choices
+        self.time_zone.choices = _timezone_choices(current)
     
 class BackLightForm(Form):
     """

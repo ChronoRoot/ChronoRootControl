@@ -28,6 +28,7 @@ from app.options.schedulerstatus import SchedulerStatus
 # Import our new system and config managers
 from app.options.config_manager import (apply_system_time_config, save_user_config,
                                         apply_hostname_config, run_git_update)
+from app.options.fixed_offsets import display_zone
 
 config_page = Blueprint('config_page', __name__,
                         template_folder='templates',
@@ -116,7 +117,7 @@ def conf():
     # 2. Pre-fill forms on GET
     if request.method == 'GET':
         app_setting_form.sync_mode.data = getattr(Config, 'USE_NTP', True)
-        app_setting_form.time_zone.data = getattr(Config, 'TIME_ZONE', 'UTC')
+        app_setting_form.time_zone.data = display_zone(getattr(Config, 'TIME_ZONE', 'UTC+00:00'))
         app_setting_form.ntp_server.data = getattr(Config, 'NTP_SERVER', 'pool.ntp.org')
         
         # Pre-fill Hardware

@@ -34,6 +34,7 @@ from app.options.config_manager import (
     persist_system_clock,
     restore_system_clock_if_needed,
 )
+from app.options.fixed_offsets import os_zone_name
 
 logging.basicConfig(filename=Config.SHDL_LOG_FILE,
                     level=Config.LOG_LEVEL,
@@ -45,7 +46,7 @@ try:
     scheduler
 except NameError:
     scheduler = BackgroundScheduler(
-        timezone=getattr(Config, 'TIME_ZONE', 'UTC'),
+        timezone=os_zone_name(getattr(Config, 'TIME_ZONE', 'UTC+00:00')),
         executors={'default': ThreadPoolExecutor(2)},
         job_defaults={'misfire_grace_time': 15},
     )

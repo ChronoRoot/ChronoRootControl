@@ -175,9 +175,18 @@ def apply_system_time_config(mode, date_str=None, timezone=None, ntp_server=None
             return False, "Time mode must be 'network' or 'manual'."
 
         if timezone:
-            if not _timezone_is_valid(timezone):
-                return False, f"Unknown timezone: {timezone}"
-            subprocess.run(['sudo', 'timedatectl', 'set-timezone', timezone], check=True)
+            from config import Config
+            from app.options.fixed_offsets import resolve_time_zone
+            resolved = resolve_time_zone(
+                timezone, current=getattr(Config, 'TIME_ZONE', None)
+            )
+            os_zone = resolved["os_name"] if resolved else None
+            if not os_zone or not _timezone_is_valid(os_zone):
+                return False, (
+                    "Unknown timezone: %s. Use a UTC offset such as "
+                    "UTC+02:00 or UTC-03:00." % timezone
+                )
+            subprocess.run(['sudo', 'timedatectl', 'set-timezone', os_zone], check=True)
             if 'TZ' in os.environ:
                 del os.environ['TZ']
             time.tzset()

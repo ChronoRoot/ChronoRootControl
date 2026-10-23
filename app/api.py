@@ -807,7 +807,7 @@ def update_system_config():
     
     Expected JSON Payload:
     {
-        "TIME_ZONE": "Europe/Paris",      # Optional: String
+        "TIME_ZONE": "UTC+02:00",         # Optional: fixed offset, UTC-12:00..UTC+14:00
         "NTP_SERVER": "pool.ntp.org",     # Optional: String
         "USE_NTP": true,                  # Optional: Boolean
         "CAMS": ["cam1", "cam2"],         # Optional: List of strings
@@ -831,7 +831,21 @@ def update_system_config():
         'SELECTOR_TYPE', 'FOCUS_DISTANCES', 'KEEP_AUTOFOCUS' 
     ]
     new_settings = {k: v for k, v in request.json.items() if k in allowed_keys}
-    
+
+    if 'TIME_ZONE' in new_settings:
+        from app.options.fixed_offsets import resolve_time_zone
+        resolved = resolve_time_zone(
+            new_settings['TIME_ZONE'], current=getattr(Config, 'TIME_ZONE', None)
+        )
+        if not resolved:
+            return make_response(jsonify({
+                'error': (
+                    'TIME_ZONE must be a UTC offset such as UTC+02:00 or '
+                    'UTC-03:00.'
+                ),
+            }), 400)
+        new_settings['TIME_ZONE'] = resolved['stored']
+
     success, msg = save_user_config(new_settings)
     
     if success:
@@ -870,7 +884,7 @@ def api_sync_time():
     Expected JSON Payload (Network Mode):
     {
         "mode": "network",             # Required: 'network' or 'manual'
-        "timezone": "Europe/Paris",    # Optional: Defaults to system config
+        "timezone": "UTC+02:00",       # Optional: fixed offset, UTC-12:00..UTC+14:00
         "ntp_server": "pool.ntp.org"   # Optional: Defaults to system config
     }
     
@@ -887,15 +901,19 @@ def api_sync_time():
     data = request.json or {}
     mode = data.get('mode', 'network')
     date_str = data.get('date')
-    timezone = data.get('timezone', getattr(Config, 'TIME_ZONE', 'UTC'))
+    timezone = data.get('timezone', getattr(Config, 'TIME_ZONE', 'UTC+00:00'))
     ntp_server = data.get('ntp_server', getattr(Config, 'NTP_SERVER', None))
 
     success, msg = apply_system_time_config(mode, date_str, timezone, ntp_server)
 
     if success:
-        return jsonify({'result': True, 'message': msg, 'server_time': datetime.now().strftime(Config.PRETTY_FORMAT)}), 200
-    else:
-        return make_response(jsonify({'error': msg}), 500)
+        return jsonify({
+            'result': True,
+            'message': msg,
+            'server_time': datetime.datetime.now().strftime(Config.PRETTY_FORMAT),
+        }), 200
+    status = 400 if str(msg).startswith('Unknown timezone') else 500
+    return make_response(jsonify({'error': msg}), status)
 
 
 @api_exp.route('/restart_service', methods=['GET'])
