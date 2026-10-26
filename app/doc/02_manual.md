@@ -32,6 +32,16 @@ Clicking "New Experiment" from the Dashboard opens the setup wizard. The system 
 * **Camera & Lighting:** Select which cameras (1 through 4) to activate for this run, and choose whether the IR backlight should turn on during capture.
 * **Validation Check:** When you hit save, ChronoRoot calculates exactly how many pictures will be taken. If your hard drive does not have enough free space to hold the experiment, the system will block the creation and warn you.
 
+### Take pictures now
+
+**Take pictures now**, next to New Experiment, takes a single round immediately. The form is the same kind of setup, with these differences:
+
+* The capture time is fixed to the moment you confirm. There is no end time and no interval.
+* You choose one capture format for every selected camera: Backlight Manual, Backlight Auto, Color Auto, or Color with denoising off. A scheduled experiment keeps using the format set on the device.
+* The IR backlight checkbox works the same way as in a normal experiment.
+* Pictures are saved in a folder named `name_hostname_date`. If you leave the name empty, the folder is `hostname_date`.
+* The shot is refused when another experiment's next round is less than 5 minutes away, so the cameras are not taken just as that round is about to start. If a round is already in progress and the next one is further off than that, this shot waits until the cameras are free and then takes its one round.
+
 ## 4. Storage Management
 
 ChronoRoot generates a massive amount of high-resolution images. This tab helps you manage where that data goes.

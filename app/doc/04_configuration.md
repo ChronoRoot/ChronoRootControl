@@ -67,9 +67,9 @@ Noteworthy configuration variables are
 
 Since the migration to Picamera2 (libcamera), camera tuning is driven by named profiles in `CAM_CAPTURE_PROFILES`, not by the legacy `CAM_PARAMS` ISP keys. Each profile bundles a set of libcamera controls that are applied via `set_controls()` right before each capture, plus a `grayscale` flag controlling whether the saved PNG is converted to monochrome. `NoiseReductionMode` from the active profile is also passed into the still/preview configuration so still capture does not start in HighQuality denoise.
 
-The existing `CAMERA_PROFILES` table (V2, V3 V2-compat, V3, V3 Wide) now includes a `tuning_file` (`imx219.json`, `imx708.json`, or `imx708_wide.json`). IR backlight profiles load that file and disable adaptive contrast (`ce_enable`). `color_auto` still opens Picamera2 with libcamera’s default tuning.
+The existing `CAMERA_PROFILES` table (V2, V3 V2-compat, V3, V3 Wide) now includes a `tuning_file` (`imx219.json`, `imx708.json`, or `imx708_wide.json`). IR backlight profiles load that file and disable adaptive contrast (`ce_enable`). `color_auto` and `color_nodenise` still open Picamera2 with libcamera’s default tuning.
 
-Three profiles ship by default:
+Four profiles ship by default:
 
 * `backlight_manual` (the default, selected by `DEFAULT_CAPTURE_PROFILE`): for modules fitted with a high-pass infrared filter. The camera only sees the IR backlight, so auto exposure, auto white balance, and noise reduction are disabled and exposure/gain are locked. This preserves the contrast and sharp root edges that the auto algorithms otherwise destroy. Tune `ExposureTime` (microseconds) and `AnalogueGain` for your chamber.
 
@@ -77,7 +77,9 @@ Three profiles ship by default:
 
 * `color_auto`: for when the IR filter is physically removed and you want normal color imaging. Auto exposure and auto white balance run normally with standard noise reduction.
 
-The active profile applies to every capture (experiments, diagnostics, and the per-camera tests). The legacy `CAM_PARAMS` ISP settings (`contrast`, `brightness`, `awb_mode`, `exposure_mode`, etc.) are no longer applied; only the profile controls take effect on the hardware.
+* `color_nodenise`: the same color capture as `color_auto`, with noise reduction forced off. If an older `user_config.py` replaced the profile list before this one existed, it is added automatically the next time the services start.
+
+Scheduled experiments, diagnostics, and the per-camera tests use the active profile. **Take pictures now** can pick a different profile for that single round. The legacy `CAM_PARAMS` ISP settings (`contrast`, `brightness`, `awb_mode`, `exposure_mode`, etc.) are no longer applied; only the profile controls take effect on the hardware.
 
 The easiest way to switch the active profile or tune the manual backlight (`ExposureTime`, `AnalogueGain`, denoise) is the **Camera Capture Profile** card under Settings -> Advanced Hardware Configuration. Saving there writes to `user_config.py` and restarts the services so the change takes effect on the next capture.
 

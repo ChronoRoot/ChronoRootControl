@@ -7,10 +7,13 @@
 {% block content %}
 
 {# --- Logic definitions based on rules --- #}
+{% set is_oneshot = exp.oneshot %}
+{% set shot_profile = exp.img_params.get('capture_profile') if exp.img_params else none %}
+{% set shot_label = config.CAPTURE_PROFILE_LABELS.get(shot_profile, shot_profile) if shot_profile else '' %}
 {% set is_setup = (exp.status == 'SETUP') or (actions == 'new') %}
 {% set is_terminal = exp.status in ['FINISHED', 'CANCELLED'] %}
 {% set is_errored = exp.status == 'ERROR' %}
-{% set is_modifiable = exp.status in ['NEW', 'SCHEDULED', 'RUNNING', 'ERROR'] %}
+{% set is_modifiable = exp.status in ['NEW', 'SCHEDULED', 'RUNNING', 'ERROR'] and not is_oneshot %}
 {% set is_running = exp.status == 'RUNNING' %}
 {% set is_active_capture = exp.status in ['RUNNING', 'ERROR'] %}
 {% set capture_ok = archive_summary and archive_summary.all_ok %}
@@ -25,7 +28,11 @@
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
     <h1 class="h2">
         {% if exp.expid %}
+            {% if is_oneshot %}
+            <i class="fas fa-camera text-primary mr-2"></i> {{ exp.expid }}
+            {% else %}
             <i class="fas fa-flask text-info mr-2"></i> {{ exp.expid }}
+            {% endif %}
         {% else %}
             <i class="fas fa-plus-circle text-success mr-2"></i> New Experiment
         {% endif %}
@@ -97,6 +104,13 @@
                         <div class="text-info font-weight-bold mt-1">
                             <i class="fas fa-cogs fa-spin mr-1"></i> Continuous Scan Active
                         </div>
+                    {% elif is_oneshot and not is_terminal %}
+                        <div class="text-primary font-weight-bold mt-1">
+                            <i class="fas fa-camera mr-1"></i> Taking one round of pictures
+                        </div>
+                        {% if shot_label %}
+                        <div class="small text-muted mt-1">{{ shot_label }}</div>
+                        {% endif %}
                     {% elif not is_terminal and job_ram and job_ram.next_run_time %}
                         <div>
                             <strong>Next Capture:</strong> 
@@ -105,6 +119,9 @@
                         </div>
                     {% elif exp.status == 'SCHEDULED' or exp.status == 'NEW' %}
                         <div><strong>Starts:</strong> {{ exp.start.strftime('%Y-%m-%d %H:%M') if exp.start else 'Not set' }}</div>
+                    {% elif is_oneshot %}
+                        <div class="font-weight-bold">One shot</div>
+                        {% if shot_label %}<div class="small text-muted mt-1">{{ shot_label }}</div>{% endif %}
                     {% else %}
                         <div class="text-muted font-italic">No upcoming actions</div>
                     {% endif %}
@@ -316,7 +333,7 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label><strong>Start Time</strong></label>
+                                <label><strong>{% if is_oneshot %}Capture time{% else %}Start Time{% endif %}</strong></label>
                                 <div class="input-group date" id="datetimepicker1" data-target-input="nearest">
                                     {{ form.start(class="form-control datetimepicker-input calc-trigger", **{'data-target': '#datetimepicker1', 'readonly': lock_start}) }}
                                     <div class="input-group-append" data-target="#datetimepicker1" {% if not lock_start %}data-toggle="datetimepicker"{% endif %}>
@@ -332,6 +349,7 @@
                             </div>
                         </div>
 
+                        {% if not is_oneshot %}
                         <div class="col-md-6">
                             <div class="form-group">
                                 <label><strong>End Time</strong></label>
@@ -346,8 +364,18 @@
                                 {% endfor %}
                             </div>
                         </div>
+                        {% else %}
+                        <div class="col-md-6">
+                            <div class="alert alert-light border mb-0">
+                                <i class="fas fa-camera mr-1"></i>
+                                One round only. The capture time is the moment this shot was confirmed.
+                                {% if shot_label %}<div class="mt-1"><strong>Format:</strong> {{ shot_label }}</div>{% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
                     
+                    {% if not is_oneshot %}
                     <div class="row mt-2">
                          <div class="col-md-6">
                             <div class="form-group">
@@ -363,6 +391,7 @@
                             </div>
                          </div>
                     </div>
+                    {% endif %}
                 </div>
             </div>
 
@@ -430,6 +459,12 @@
                     {% if is_setup %}
                         <button type="submit" name="action" value="new" class="btn btn-success btn-lg btn-block mb-3">
                             <i class="fas fa-play-circle mr-2"></i> Start / Launch
+                        </button>
+
+                    {# One round already confirmed: it can be stopped, not rescheduled. #}
+                    {% elif is_oneshot and not is_terminal %}
+                        <button type="submit" name="action" value="cancel" class="btn btn-warning btn-block btn-lg">
+                            <i class="fas fa-stop-circle mr-2"></i> Stop
                         </button>
 
                     {# 2. RUNNING & ERROR: Save (End time only), Stop #}
@@ -603,6 +638,12 @@
         $('#cameras').on('change', calculateEstimates);
         
         calculateEstimates();
+    });
+    {% elif is_oneshot %}
+    $(function() {
+        var numCams = {{ exp.cameras|length if exp.cameras else 0 }};
+        $('#est-pics').text(numCams);
+        $('#est-size').text(((numCams * 4) / 1024).toFixed(2) + " GB");
     });
     {% else %}
     $(function() { calculateEstimates(); });

@@ -10,6 +10,7 @@ from wtforms import (BooleanField, SelectField, StringField, SelectMultipleField
                      IntegerField, FloatField)
 from wtforms.fields import DateTimeField
 from wtforms.validators import Optional, DataRequired, Length, Regexp
+from default_config import capture_profile_choices
 from wtforms import widgets
 
 
@@ -88,11 +89,7 @@ class CameraProfileForm(Form):
     """
     Selects the active Picamera2 capture profile and tunes the manual backlight.
     """
-    default_profile = SelectField('Active Capture Profile', choices=[
-        ('backlight_manual', 'Backlight Manual (locked exposure, grayscale)'),
-        ('backlight_auto', 'Backlight Auto (IR-neutral WB, auto exposure, no denoise)'),
-        ('color_auto', 'Color Auto (auto exposure/WB, denoised, color)'),
-    ])
+    default_profile = SelectField('Active Capture Profile', choices=capture_profile_choices())
     exposure_time = IntegerField('Manual Exposure Time (us)', validators=[Optional()])
     analogue_gain = FloatField('Manual Analogue Gain', validators=[Optional()])
     denoise = BooleanField('Manual Backlight Denoise')

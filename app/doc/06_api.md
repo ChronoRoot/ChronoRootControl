@@ -12,7 +12,7 @@ Before polling endpoints, understand three ideas that recur throughout the API.
 
 **Module.** One Raspberry Pi running ChronoRoot. It has a hostname, IP, and MAC address (`identity` in `/api/status`). It may have one to four camera ports on an IVPort multiplexer.
 
-**Experiment.** A scheduled imaging run with a start time, end time, interval (minutes between capture rounds), and a list of camera ports to use. Configuration and authoritative status are stored on disk in `workdir/<expid>/info.json`. Image files live in `workdir/<expid>/<camera_id>/`.
+**Experiment.** A scheduled imaging run with a start time, end time, interval (minutes between capture rounds), and a list of camera ports to use. Configuration and authoritative status are stored on disk in `workdir/<expid>/info.json`. Image files live in `workdir/<expid>/<camera_id>/`. A one-shot (`oneshot: true`) is a single round taken immediately: `start` and `end` are the confirmation time, and `expected_pictures` is 1.
 
 **Capture round.** One scheduler tick. The module tries every camera selected for the experiment. A round counts as successful in RAM progress if **at least one** camera produces an image. Per-camera file counts are counted separately on disk.
 
@@ -170,10 +170,12 @@ After a reboot, the scheduler mule runs `resync_with_disk`: it reloads non-finis
 | `expected_pictures` | Images **per camera** expected for the full window. |
 | `cameras` | List of camera port integers, e.g. `[1, 2, 3]`. |
 | `ir` | Whether infrared backlight is used. |
+| `oneshot` | `true` when this folder is a single round taken from **Take pictures now**. |
+| `img_params` | Capture settings. One-shots set `capture_profile` (`backlight_manual`, `backlight_auto`, `color_auto`, or `color_nodenise`). Scheduled experiments leave it unset and use the module's active profile. |
 | `workdir` | Absolute path to experiment folder. |
 | `creation` / `modification` | Timestamps of create/update. |
 
-`expected_pictures` is computed from `(end - start) / interval`, rounded up, plus one for the shot at minute zero.
+`expected_pictures` is computed from `(end - start) / interval`, rounded up, plus one for the shot at minute zero. A one-shot is always 1 per camera.
 
 ---
 

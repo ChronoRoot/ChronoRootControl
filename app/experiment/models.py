@@ -38,6 +38,7 @@ class Experiment(object):
         # Mutable defaults
         self.cameras = []
         self.ir = False
+        self.oneshot = False
         self.img_params = Config.CAM_PARAMS.copy() if Config.CAM_PARAMS else {}
         
         # Logs: Transient list, populated from log.txt
@@ -151,6 +152,8 @@ class Experiment(object):
     @property
     def expected_pictures(self):
         """Calculates total pictures based on time window and interval."""
+        if self.oneshot:
+            return 1
         if not self.interval or int(self.interval) <= 0: 
             return 0
         duration_minutes = (self.end - self.start).total_seconds() / 60.0
@@ -230,6 +233,7 @@ class Experiment(object):
             "expected_pictures": self.expected_pictures,
             "cameras":  self.cameras,
             "ir": self.ir,
+            "oneshot": self.oneshot,
             "workdir": self.workdir,
             "img_params": self.img_params
         }
@@ -258,6 +262,40 @@ class Experiment(object):
         self.save() 
         
         message = {'id': self.expid, 'action': 'CREATE'}
+        uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
+
+    def launch_oneshot(self, profile_name):
+        """
+        Save one round and ask the scheduler mule to take it immediately.
+
+        The folder id uses the confirmation time: name_hostname_date.
+        """
+        now = datetime.now()
+        self.oneshot = True
+        self.start = now
+        self.end = now
+        self.interval = 15
+        self.status = "RUNNING"
+        self.message = "Taking pictures now."
+        self.img_params = dict(self.img_params or {})
+        self.img_params["capture_profile"] = profile_name
+
+        for _ in range(5):
+            self.expid = None
+            self.workdir = ""
+            self.generate_id()
+            info_path = os.path.join(self.workdir, "info.json")
+            if not os.path.exists(info_path):
+                break
+            self.start = self.start + timedelta(seconds=1)
+            self.end = self.start
+        else:
+            raise RuntimeError("Could not create a unique folder for this capture.")
+
+        self.log_event("One-shot capture requested (%s)." % profile_name)
+        self.save()
+
+        message = {'id': self.expid, 'action': 'ONESHOT'}
         uwsgi.mule_msg(json.dumps(message), Config.MULE_NO)
 
     def cancel(self):

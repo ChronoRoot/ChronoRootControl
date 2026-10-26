@@ -239,7 +239,7 @@ def conf():
 
     # --- 3. Camera Capture Profile Logic ---
     if request.form.get('action') == 'set_camera':
-        valid_profiles = ('backlight_manual', 'backlight_auto', 'color_auto')
+        valid_profiles = tuple(getattr(Config, 'CAM_CAPTURE_PROFILES', {}))
         sel_profile = request.form.get('cam-default_profile', 'backlight_manual')
         if sel_profile not in valid_profiles:
             sel_profile = 'backlight_manual'
@@ -287,6 +287,14 @@ def conf():
                     'AeEnable': True,
                     'AwbEnable': True,
                     'NoiseReductionMode': 1,
+                },
+            },
+            'color_nodenise': {
+                'grayscale': False,
+                'controls': {
+                    'AeEnable': True,
+                    'AwbEnable': True,
+                    'NoiseReductionMode': 0,
                 },
             },
         }

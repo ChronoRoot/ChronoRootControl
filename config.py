@@ -1,8 +1,15 @@
 """
 The running configuration that is based on default settings
 """
+import copy
 import os
 from default_config import Config
+
+# Kept aside so a user_config.py that replaces CAM_CAPTURE_PROFILES still
+# gains profiles added after that file was written.
+_BUILTIN_COLOR_NODENISE = copy.deepcopy(
+    Config.CAM_CAPTURE_PROFILES["color_nodenise"]
+)
 
 def load_user_config():
     """
@@ -33,4 +40,14 @@ def load_user_config():
 
 # Load user configuration if available
 load_user_config()
+
+
+def _ensure_capture_profiles():
+    """Keep built-in profiles available when user config replaced the whole dict."""
+    profiles = getattr(Config, "CAM_CAPTURE_PROFILES", None)
+    if isinstance(profiles, dict) and "color_nodenise" not in profiles:
+        profiles["color_nodenise"] = copy.deepcopy(_BUILTIN_COLOR_NODENISE)
+
+
+_ensure_capture_profiles()
 

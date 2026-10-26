@@ -6,11 +6,12 @@ SettingsForm: Settings of an experiment
 import datetime
 
 from flask_wtf import FlaskForm as Form
-from wtforms import (BooleanField, IntegerField, SelectMultipleField,
+from wtforms import (BooleanField, IntegerField, SelectField, SelectMultipleField,
                      TextAreaField, ValidationError, StringField)
 from wtforms.fields import DateTimeField
-from wtforms.validators import Optional, Length
+from wtforms.validators import DataRequired, Optional, Length
 from config import Config
+from default_config import capture_profile_choices
 
 from phototron.rpimodule import RpiModule
 
@@ -128,3 +129,43 @@ class SettingsForm(Form):
             return False
             
         return True
+
+
+class OneShotForm(Form):
+    """
+    One round of pictures, taken when the form is confirmed.
+    """
+
+    name = StringField("Experiment Name",
+                       validators=[Optional(), Length(max=16)],
+                       description='Short name for the experiment folder')
+
+    desc = TextAreaField(u"Description:",
+                        validators=[Optional()],
+                        description='About this experiment')
+
+    ir = BooleanField("IR Backlight",
+                      default=True,
+                      description="Turn the infrared lights on/off")
+
+    cameras = SelectMultipleField('Cameras',
+                                  choices=[(cam, "Camera %s" % cam) for cam in Config.CAMS],
+                                  default=list(Config.CAMS),
+                                  coerce=int,
+                                  description='Cameras to use')
+
+    capture_profile = SelectField("Capture format",
+                                  choices=capture_profile_choices(),
+                                  default=Config.DEFAULT_CAPTURE_PROFILE
+                                      if Config.DEFAULT_CAPTURE_PROFILE in Config.CAM_CAPTURE_PROFILES
+                                      else "backlight_manual",
+                                  validators=[DataRequired()],
+                                  description='Applied to every camera in this round')
+
+    def validate_cameras(self, field):
+        if not field.data or len(field.data) < 1:
+            raise ValidationError("Select at least one camera")
+
+    def validate_capture_profile(self, field):
+        if field.data not in Config.CAM_CAPTURE_PROFILES:
+            raise ValidationError("Unknown capture format.")

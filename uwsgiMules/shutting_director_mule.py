@@ -25,6 +25,7 @@ app_ctx.push()
 
 from phototron.rpimodule import RpiModule
 from app.experiment.models import Experiment
+from app.experiment.oneshot import LOCK_WAIT_SECONDS, clearance_message, scheduled_capture_within
 from app.experimentlist.models import ExperimentList 
 from app.options.schedulerstatus import SchedulerStatus
 from app.sync.manager import run_rclone_sync
@@ -467,6 +468,8 @@ class ChiefOperator(object):
         try:
             if action == 'CREATE':
                 self.schedule_job(xpid)
+            elif action == 'ONESHOT':
+                self.run_oneshot(xpid)
             elif action == 'CANCEL':
                 self.cancel_job(xpid)
             elif action == 'UPDATE':
@@ -526,12 +529,19 @@ class ChiefOperator(object):
         self.logger.info("--- Resyncing Scheduler with Disk ---")
         exp_list = ExperimentList()
         running_jobs = {job.id for job in scheduler.get_jobs()}
+        pending_oneshots = []
         
         for exp in exp_list.exps:
             if exp.expid == 'system' or exp.status == 'DIAGNOSTICS':
                 continue
 
             if exp.status in ['CANCELLED', 'FINISHED']:
+                continue
+
+            # Schedule real experiments first, so a resumed one-shot can see
+            # how soon the next round actually is.
+            if getattr(exp, "oneshot", False):
+                pending_oneshots.append(exp)
                 continue
 
             now = datetime.now()
@@ -551,12 +561,19 @@ class ChiefOperator(object):
             else:
                 self.logger.info(f"Job {exp.expid} is already active.")
                 
+        for exp in pending_oneshots:
+            self.recover_oneshot(exp)
+
         # Notice we removed the SYNC job injection here. The daemon handles it now.
         self.logger.info("--- Resync Complete ---")
 
     def schedule_job(self, exp_id):
         exp = load_exp_safe(exp_id)
         if not exp:
+            return
+
+        if getattr(exp, "oneshot", False):
+            self.logger.info(f"Skipping schedule for one-shot {exp_id}")
             return
 
         if exp.status in ("CANCELLED", "FINISHED"):
@@ -707,6 +724,124 @@ class ChiefOperator(object):
             exp.status = "FINISHED"
             exp._end = datetime.now().strftime(Config.PRETTY_FORMAT)
             exp.save()
-            
+
+    def _hardware_locked(self):
+        """True only when the camera lock is actually held, not when RAM state is stale."""
+        from filelock import FileLock, Timeout
+        probe = FileLock(Config.LOCK_FILE)
+        try:
+            with probe.acquire(timeout=0):
+                return False
+        except Timeout:
+            return True
+
+    def _oneshot_has_pictures(self, exp):
+        if not exp.workdir or not exp.cameras:
+            return False
+        for cam in exp.cameras:
+            cam_dir = os.path.join(exp.workdir, str(cam))
+            if Experiment._count_images_in_dir(cam_dir) > 0:
+                return True
+        return False
+
+    def _abort_oneshot(self, exp, reason, when=None):
+        if reason == "blocked":
+            message = clearance_message(when)
+        else:
+            message = "Cameras stayed busy, so this one-shot was not taken."
+        current = load_exp_safe(exp.expid) or exp
+        if current.status in ("CANCELLED", "FINISHED"):
+            return
+        current.status = "CANCELLED"
+        current.message = message
+        current.log_event(message)
+        current.save()
+        scheduler_status.remove_experiment(current.expid)
+        self.logger.info(f"One-shot {current.expid} cancelled: {message}")
+
+    def _wait_for_oneshot_window(self, exp):
+        """
+        Wait while another capture holds the cameras.
+
+        Returns (state, when). state is 'clear', 'blocked', 'busy', or 'stopped'.
+        A shot already inside the five-minute window is not taken.
+        """
+        started = time.time()
+        while True:
+            current = load_exp_safe(exp.expid)
+            if current is None or current.status in ("CANCELLED", "FINISHED"):
+                return "stopped", None
+            blocked, when = scheduled_capture_within()
+            if blocked:
+                return "blocked", when
+            if not self._hardware_locked():
+                return "clear", when
+            if time.time() - started > LOCK_WAIT_SECONDS:
+                return "busy", None
+            time.sleep(1)
+
+    def recover_oneshot(self, exp):
+        """Finish, resume, or drop a one-shot found on disk at startup."""
+        if self._oneshot_has_pictures(exp):
+            self.logger.info(f"Finishing one-shot {exp.expid}: pictures already on disk.")
+            end_experiment(exp)
+            return
+        age = datetime.now() - exp.start
+        if age <= timedelta(minutes=10):
+            self.logger.info(f"Resuming one-shot {exp.expid} after restart.")
+            self.run_oneshot(exp.expid)
+            return
+        message = "One-shot was interrupted before capture."
+        exp.status = "CANCELLED"
+        exp.message = message
+        exp.log_event(message)
+        exp.save()
+        self.logger.info(f"Cancelled stale one-shot {exp.expid}.")
+
+    def run_oneshot(self, exp_id):
+        """Take one round for a one-shot experiment, then mark it finished."""
+        exp = load_exp_safe(exp_id)
+        if not exp or not getattr(exp, "oneshot", False):
+            self.logger.warning(f"ONESHOT ignored for {exp_id}")
+            return
+        if exp.status in ("CANCELLED", "FINISHED"):
+            return
+        if self._oneshot_has_pictures(exp):
+            end_experiment(exp)
+            return
+
+        state, when = self._wait_for_oneshot_window(exp)
+        if state == "stopped":
+            return
+        if state != "clear":
+            self._abort_oneshot(exp, state, when)
+            return
+
+        exp = load_exp_safe(exp_id)
+        if not exp or exp.status in ("CANCELLED", "FINISHED"):
+            return
+
+        scheduler_status.register_job_metadata(
+            exp.expid,
+            exp.name,
+            1,
+            starting_count=0,
+            start_str=exp._start,
+            interval=exp.interval,
+            end_str=exp._end,
+        )
+        try:
+            RpiModule.take_picture(exp_id, scheduler_status)
+        except Exception as exc:
+            self.logger.error(f"One-shot {exp_id} failed: {exc}")
+            failed = load_exp_safe(exp_id)
+            if failed and failed.status not in ("CANCELLED", "FINISHED"):
+                failed.log_event(f"One-shot capture failed: {exc}")
+                failed.save()
+
+        finished = load_exp_safe(exp_id)
+        if finished:
+            end_experiment(finished)
+
 if __name__ == '__main__':
     ChiefOperator.mainLoop()

@@ -179,6 +179,22 @@ class Config(object):
                 "NoiseReductionMode": 1,    # fast/standard
             },
         },
+        # Visible light, same automatic exposure and white balance, denoise off.
+        "color_nodenise": {
+            "grayscale": False,
+            "controls": {
+                "AeEnable": True,
+                "AwbEnable": True,
+                "NoiseReductionMode": 0,
+            },
+        },
+    }
+
+    CAPTURE_PROFILE_LABELS = {
+        "backlight_manual": "Backlight Manual (locked exposure, grayscale)",
+        "backlight_auto": "Backlight Auto (IR-neutral WB, auto exposure, no denoise)",
+        "color_auto": "Color Auto (auto exposure/WB, denoised, color)",
+        "color_nodenise": "Color (auto exposure/WB, no denoise)",
     }
 
     # When True, captures and the live preview request a square resolution
@@ -193,3 +209,25 @@ class Config(object):
     SYNC_MODE = 'copy'       # 'copy' (keep local) or 'move' (delete local after upload)
     SYNC_DESTINATION = ''    # e.g., '/media/pi/usb_drive' OR 'my_remote:/backup'
     SYNC_INTERVAL = 60       # Run every X minutes
+
+
+def capture_profile_choices():
+    """Select options for every capture profile, built-ins first."""
+    order = (
+        "backlight_manual",
+        "backlight_auto",
+        "color_auto",
+        "color_nodenise",
+    )
+    labels = getattr(Config, "CAPTURE_PROFILE_LABELS", {})
+    profiles = getattr(Config, "CAM_CAPTURE_PROFILES", {})
+    choices = []
+    seen = set()
+    for key in order:
+        if key in profiles:
+            choices.append((key, labels.get(key, key)))
+            seen.add(key)
+    for key in profiles:
+        if key not in seen:
+            choices.append((key, labels.get(key, key)))
+    return choices

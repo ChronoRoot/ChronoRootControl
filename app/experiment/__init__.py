@@ -2,13 +2,15 @@
 Management of an experiment
 """
 import os
+import socket
 from datetime import datetime
 
 from flask import Blueprint, abort, flash, render_template, request, url_for, redirect
 from wtforms import SelectMultipleField
 
-from app.experiment.form import SettingsForm
+from app.experiment.form import OneShotForm, SettingsForm
 from app.experiment.models import Experiment
+from app.experiment.oneshot import clearance_message, scheduled_capture_within
 from app.options.schedulerstatus import SchedulerStatus
 from config import Config
 
@@ -54,6 +56,46 @@ def new_experiment():
     return render_template('experiment.html', form=form, exp=exp, config=Config, 
                            actions=actions, storage=storage_info, now=datetime.now().strftime(Config.PRETTY_FORMAT))
 
+@experiment_page.route('/now', methods=['GET', 'POST'])
+def take_pictures_now():
+    """One round of pictures, saved under name_hostname_confirm-time."""
+    form = OneShotForm()
+    blocked, when = scheduled_capture_within()
+    status_manager = SchedulerStatus.for_read()
+    storage_info = status_manager.get_info(reload=False).get("system_health", {}).get("storage", {})
+
+    if form.validate_on_submit():
+        blocked, when = scheduled_capture_within()
+        if blocked:
+            flash(clearance_message(when), 'danger')
+        else:
+            exp = Experiment()
+            exp.name = form.name.data or ""
+            exp.desc = form.desc.data or ""
+            exp.ir = bool(form.ir.data)
+            exp.cameras = list(form.cameras.data)
+            try:
+                exp.launch_oneshot(form.capture_profile.data)
+            except Exception as exc:
+                if exp.expid:
+                    flash('The folder was created, but the capture could not be queued: %s' % exc, 'danger')
+                    return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+                flash('Could not start the capture: %s' % exc, 'danger')
+            else:
+                flash('Taking pictures now. Folder: %s' % exp.expid, 'success')
+                return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
+
+    return render_template(
+        'oneshot.html',
+        form=form,
+        config=Config,
+        blocked=blocked,
+        next_capture=when,
+        storage=storage_info,
+        hostname=socket.gethostname(),
+        now=datetime.now().strftime(Config.PRETTY_FORMAT),
+    )
+
 @experiment_page.route('/<expid>', methods=['GET', 'POST'])
 def setuped_experiment(expid):   
     try:
@@ -87,8 +129,11 @@ def setuped_experiment(expid):
                     latest_file = max(files, key=lambda x: os.path.getmtime(os.path.join(cam_dir, x)))
                     last_images[cam] = f"{exp.expid}/{cam}/{latest_file}"
 
-    # Determine permissions based on Status
-    if exp.status in ["NEW", "SCHEDULED", "RUNNING", "ERROR"]:
+    # Determine permissions based on Status.
+    # A one-shot is a single round: it can be stopped or deleted, not rescheduled.
+    if getattr(exp, "oneshot", False) and exp.status not in ("FINISHED", "CANCELLED"):
+        actions = "readonly"
+    elif exp.status in ["NEW", "SCHEDULED", "RUNNING", "ERROR"]:
         actions = "editable"
     elif exp.status == "SETUP":
         actions = "new"
@@ -97,6 +142,10 @@ def setuped_experiment(expid):
 
     if request.method == 'POST':
         action = request.form['action']
+
+        if action == "save" and getattr(exp, "oneshot", False):
+            flash('A one-shot capture cannot be edited.', 'warning')
+            return redirect(url_for('experiment_page.setuped_experiment', expid=exp.expid))
 
         if action == "save" and actions == "editable":
             if form.validate_on_submit():
